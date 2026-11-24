@@ -1,6 +1,6 @@
 ﻿// Service worker: deixa o app instalável e abre a interface mesmo offline.
-const CACHE = "acaiamusic-v34";
-const SHELL = ["/", "/index.html", "/style.css", "/app.js", "/manifest.json", "/icon.svg"];
+const CACHE = "acaiamusic-v35";
+const SHELL = ["/", "/index.html", "/style.css", "/app.js", "/manifest.json", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
@@ -12,10 +12,11 @@ self.addEventListener("activate", (e) => {
 });
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.pathname.startsWith("/api/")) return;
-  // Rede primeiro; cache como reserva.
+  // só o "casco" do app: nada de API, áudios (tocados em partes) nem outros sites
+  if (e.request.method !== "GET" || url.origin !== location.origin || /^\/(api|audio)\//.test(url.pathname)) return;
+  // Rede primeiro (sempre a versão nova); cache como reserva offline.
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request.url, { cache: "no-cache", credentials: "same-origin" })
       .then((res) => {
         if (res.ok && url.origin === location.origin) {
           const copy = res.clone();

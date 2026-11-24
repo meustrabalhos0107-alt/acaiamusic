@@ -1,18 +1,20 @@
 {
-  "name": "AcaiaMusic - Músicas com IA",
-  "short_name": "AcaiaMusic",
-  "description": "Crie músicas originais com inteligência artificial: letra, voz e instrumental.",
+  "id": "/",
+  "name": "ACAIAMUSIC · Sua fé em forma de canção",
+  "short_name": "ACAIAMUSIC",
+  "description": "Crie cantos para a Santa Missa e músicas completas com IA: letra, voz, cifra, playback, karaokê e vídeo.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#12071a",
+  "background_color": "#0f0a17",
   "theme_color": "#1a0b24",
   "lang": "pt-BR",
-  "categories": ["music", "entertainment"],
+  "dir": "ltr",
+  "categories": ["music", "entertainment", "lifestyle"],
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }
