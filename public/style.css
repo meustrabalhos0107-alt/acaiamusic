@@ -598,8 +598,17 @@ body.has-player #btn-lyrics { bottom: calc(var(--player-h) + 12px); }
 .kk-lyrics::-webkit-scrollbar { display: none; }
 .kk-sec { margin: 14px 0 4px; font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.16em; text-transform: uppercase; color: #f472b6; }
 .kk-line { margin: 4px 0; font-size: 1.02rem; line-height: 1.45; color: var(--muted); transition: color 0.3s, transform 0.3s; }
-.kk-line.on { color: #fff; font-weight: 800; transform: scale(1.06); text-shadow: 0 0 18px rgba(244, 114, 182, 0.55); }
-.kk-count { position: absolute; inset: 0; display: grid; place-items: center; font-size: 4.5rem; font-weight: 900; color: #fff; pointer-events: none; z-index: 2; text-shadow: 0 0 30px #f472b6; }
+/* verso atual: vai se preenchendo de rosa enquanto é cantado (--p = quanto já foi cantado) */
+.kk-line.on {
+  --p: 0%; font-weight: 800; transform: scale(1.08);
+  background: linear-gradient(90deg, #f9a8d4 0, #f472b6 var(--p), #fff var(--p), #fff 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 14px rgba(244, 114, 182, 0.45));
+}
+.kk-line.done { color: rgba(255, 255, 255, 0.38); }
+.kk-line.next { color: rgba(255, 255, 255, 0.72); }
+.kk-sync-tag { position: absolute; top: 10px; left: 12px; z-index: 3; font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.08em; color: var(--muted); }
+.kk-count { position: absolute; inset: 0; display: grid; place-items: center; font-size: 2.6rem; font-weight: 900; color: #fff; pointer-events: none; z-index: 2; text-shadow: 0 0 30px #f472b6; }
 .kk-count:empty { display: none; }
 .kk-transport { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .kk-transport .progress { flex: 1; }

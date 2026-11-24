@@ -2183,7 +2183,18 @@ function renderKaraoke() {
   $("#kk-progress").classList.add("hidden");
   $("#kk-prog").style.width = "0%";
   $("#kk-time").textContent = "0:00";
+  // tempos reais de cada verso (calculados ouvindo a faixa de voz)
+  kkTiming = null;
+  const id = s.id;
+  api(`/api/songs/${id}/timing`)
+    .then((t) => {
+      if (dlgSong?.id !== id) return;
+      kkTiming = t.times?.length === n ? t : null;
+      $("#kk-sync-tag").textContent = kkTiming ? "🎯 letra sincronizada com a voz" : "letra em tempo aproximado";
+    })
+    .catch(() => {});
 }
+let kkTiming = null;
 $("#kk-go-stems").onclick = () => {
   selectTab("faixas");
   $("#btn-stems").click();
@@ -2206,10 +2217,30 @@ function kkFollow() {
   $("#kk-time").textContent = `${fmt(t)} / ${fmt(d)}`;
   const lines = $$("#kk-lyrics .kk-line");
   if (lines.length) {
-    const intro = Math.min(12, d * 0.08); // estimativa da introdução instrumental
-    const k = Math.max(0, Math.min(lines.length - 1, Math.floor(((t - intro) / Math.max(1, d - intro * 1.5)) * lines.length)));
-    lines.forEach((el, i) => el.classList.toggle("on", i === k && t > intro * 0.6));
-    if (t > intro * 0.6) lines[k].scrollIntoView({ block: "center", behavior: "smooth" });
+    let k = -1, p = 0;
+    if (kkTiming) {
+      const T = kkTiming.times, lead = 0.15; // acende um tiquinho antes, para dar tempo de ler
+      for (let i = 0; i < T.length; i++) if (T[i] <= t + lead) k = i;
+      if (k >= 0) {
+        const end = T[k + 1] ?? T[k] + Math.max(3, (d - T[k]) / 2);
+        p = Math.max(0, Math.min(1, (t - T[k]) / Math.max(0.5, end - T[k] - 0.3)));
+      }
+      const wait = (T[0] ?? 0) - t;
+      $("#kk-count").textContent = k < 0 && wait > 0 && wait <= 3.2 ? `entra em ${Math.ceil(wait)}` : "";
+    } else {
+      const intro = Math.min(12, d * 0.08); // sem a faixa de voz: estimativa pela duração
+      if (t > intro * 0.6) k = Math.max(0, Math.min(lines.length - 1, Math.floor(((t - intro) / Math.max(1, d - intro * 1.5)) * lines.length)));
+    }
+    lines.forEach((el, i) => {
+      el.classList.toggle("on", i === k);
+      el.classList.toggle("done", i < k);
+      el.classList.toggle("next", i === k + 1);
+    });
+    if (k >= 0) {
+      lines[k].style.setProperty("--p", kkTiming ? `${Math.round(p * 100)}%` : "100%");
+      if (kk.lastK !== k) lines[k].scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    kk.lastK = k;
   }
   kk.raf = requestAnimationFrame(kkFollow);
 }

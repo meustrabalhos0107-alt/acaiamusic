@@ -201,6 +201,71 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     res.json({ jobId: id });
   });
 
+  // ===== Karaokê: tempo de cada verso (a letra aparece na hora em que é cantada) =====
+  // Ouve a faixa de VOZ separada: acha os trechos cantados (entre as pausas) e encaixa cada verso
+  // no momento certo, proporcional ao tamanho do verso dentro do tempo realmente cantado.
+  function voicedSegments(file) {
+    return new Promise((resolve, reject) => {
+      execFile(
+        ffmpegPath,
+        ["-hide_banner", "-i", file, "-af", "aformat=channel_layouts=mono,silencedetect=noise=-32dB:d=0.32", "-f", "null", "-"],
+        { maxBuffer: 1 << 24, timeout: 120000, windowsHide: true },
+        (err, _o, stderr) => {
+          if (err && !stderr) return reject(err);
+          const dur = Number(/Duration: (\d+):(\d+):([\d.]+)/.exec(stderr)?.slice(1).reduce((a, x, i) => a + x * [3600, 60, 1][i], 0)) || 0;
+          const segs = [];
+          let start = 0;
+          for (const m of stderr.matchAll(/silence_(start|end): ([\d.]+)/g)) {
+            const t = Number(m[2]);
+            if (m[1] === "start") {
+              if (t - start > 0.25) segs.push([start, t]);
+            } else start = t;
+          }
+          if (dur - start > 0.25 && !/silence_start: [\d.]+\s*$/.test(stderr.trim())) segs.push([start, dur]);
+          resolve({ segs, dur });
+        },
+      );
+    });
+  }
+  function alignLines(lines, segs) {
+    const voiced = segs.reduce((a, [s, e]) => a + (e - s), 0);
+    if (!lines.length || !voiced) return [];
+    const weight = lines.map((l) => Math.max(4, l.replace(/[^\p{L}\p{N}]/gu, "").length)); // versos maiores levam mais tempo
+    const total = weight.reduce((a, b) => a + b, 0);
+    const atVoiced = (v) => {
+      // converte "tempo cantado" em tempo real da música
+      for (const [s, e] of segs) {
+        if (v <= e - s) return s + v;
+        v -= e - s;
+      }
+      return segs.at(-1)[1];
+    };
+    let acc = 0;
+    return lines.map((_, k) => {
+      let t = atVoiced((acc / total) * voiced);
+      acc += weight[k];
+      // gruda no começo de frase mais próximo (até 1,5 s), que é onde o verso realmente começa
+      const near = segs.map(([s]) => s).filter((s) => Math.abs(s - t) <= 1.5).sort((a, b) => Math.abs(a - t) - Math.abs(b - t))[0];
+      return Math.round((near ?? t) * 100) / 100;
+    }).map((t, k, arr) => (k && t <= arr[k - 1] ? arr[k - 1] + 0.4 : t)); // sempre em ordem
+  }
+  app.get("/api/songs/:id/timing", async (req, res) => {
+    const song = (await loadSongs()).find((s) => s.id === req.params.id);
+    if (!song) return res.status(404).json({ error: "Música não encontrada." });
+    const lines = (song.sections || []).flatMap((s) => s.lines);
+    const sig = lines.join("\n").length + ":" + lines.length;
+    if (song.timing?.sig === sig) return res.json(song.timing);
+    if (!song.stems?.vocals) return res.json({ times: [], approximate: true });
+    try {
+      const { segs, dur } = await voicedSegments(path.join(SONGS_DIR, song.stems.vocals.replace(/^\/audio\//, "")));
+      const timing = { sig, times: alignLines(lines, segs), dur, firstVoice: segs[0]?.[0] ?? 0 };
+      await saveField(song.id, { timing });
+      res.json(timing);
+    } catch (e) {
+      res.json({ times: [], approximate: true, error: e.message });
+    }
+  });
+
   // ===== Karaokê: junta a voz gravada pela pessoa com o playback e melhora a gravação =====
   let karaokeChain = Promise.resolve();
   const REVERBS = {
