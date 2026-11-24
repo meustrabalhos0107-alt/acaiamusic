@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.acaiamusiconrendercom.twa",
+        "sha256_cert_fingerprints": ["29:0A:11:57:18:E8:B7:DF:8B:B3:20:FE:90:69:0B:F6:34:80:02:BA:1C:5E:2C:A6:7D:95:6E:BC:C4:53:D4:37"]
+      }
+    }]
