@@ -2963,6 +2963,7 @@ async function refreshStatus() {
     $("#auto-user").textContent = a.user ? `conta ${a.user}` : "";
     $("#auto-phase").textContent = s.kaggle?.ok ? "🟢 Ligado e pronto para criar músicas." : a.running ? `⏳ ${a.phase || "Ligando…"}` : a.error ? `⚠️ ${a.error}` : "⚪ Desligado: liga sozinho quando você criar uma música.";
     $("#auto-start").disabled = Boolean(a.running || s.kaggle?.ok);
+    for (const id of ["#kg-quota", "#home-quota"]) paintQuota($(id), a.quota, s.kaggle?.ok && s.kaggleCpu);
     clearTimeout(refreshStatus.t);
     if (a.running && $("#settings-dialog").open) refreshStatus.t = setTimeout(refreshStatus, 8000);
     const own = s.kaggle?.ok || s.modal?.ok;
@@ -3009,8 +3010,9 @@ $("#btn-settings").onclick = async () => {
   try {
     const st = await api("/api/settings");
     $("#kg-url").value = st.kaggleUrl || "";
-    $("#kg-key").value = "";
-    $("#kg-key-hint").textContent = st.hasKey ? "· já salva (deixe vazio para manter)" : "";
+    $("#kg-key").value = st.keyMasked || ""; // já preenchida (mascarada); só troca se você digitar outra
+    $("#kg-key-hint").textContent = st.hasKey ? "· salva ✓" : "";
+    paintQuota($("#kg-quota"), st.quota, st.kaggleCpu);
   } catch {}
   refreshStatus();
 };
@@ -3020,10 +3022,12 @@ $("#kg-save").onclick = async (e) => {
   btn.disabled = true;
   btn.textContent = "Testando…";
   try {
-    await api("/api/settings", { method: "POST", body: JSON.stringify({ kaggleUrl: $("#kg-url").value, kaggleKey: $("#kg-key").value }) });
+    const typed = $("#kg-key").value.includes("•") ? "" : $("#kg-key").value; // mascarada = mantém a salva
+    await api("/api/settings", { method: "POST", body: JSON.stringify({ kaggleUrl: $("#kg-url").value, kaggleKey: typed }) });
     toast("✅ Estúdio do Kaggle conectado! As próximas músicas serão criadas lá.", false, 6000);
-    $("#kg-key").value = "";
-    $("#kg-key-hint").textContent = "· já salva";
+    const st = await api("/api/settings").catch(() => ({}));
+    $("#kg-key").value = st.keyMasked || "";
+    $("#kg-key-hint").textContent = "· salva ✓";
   } catch (err) {
     toast(err.message, true, 7000);
   } finally {
@@ -3068,6 +3072,21 @@ async function startStudioNow() {
   }
   setTimeout(refreshStatus, 1500);
 }
+// ---- Quanto tempo de GPU ainda resta no Kaggle (semana) ----
+function paintQuota(el, q, cpuMode) {
+  if (!el) return;
+  el.classList.toggle("hidden", !q);
+  if (!q) return;
+  const h = (n) => n.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+  const pct = Math.max(0, Math.min(100, (q.remaining / (q.total || 30)) * 100));
+  const renew = new Date(q.refreshAt).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
+  el.innerHTML = `
+    <div class="q-head"><b>⏱ ${h(q.remaining)} h</b> de GPU restantes <span>de ${h(q.total)} h · renova ${esc(renew)}</span></div>
+    <div class="q-bar"><i style="width:${pct}%"></i></div>
+    ${cpuMode ? `<small>No modo processador o estúdio <b>não gasta</b> essas horas.</small>` : ""}`;
+  el.classList.toggle("low", q.remaining < 5);
+}
+
 // ---- Fechar o player ----
 function closePlayer() {
   audio.pause();

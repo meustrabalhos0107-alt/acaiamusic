@@ -113,6 +113,7 @@
             <span class="eyebrow">Servidor de música</span>
             <div class="srv-line"><i></i><b>Verificando…</b></div>
             <small></small>
+            <div class="quota hidden" id="home-quota"></div>
             <div class="srv-btns">
               <button class="btn ghost sm hidden" data-studio-start>⚡ Ligar estúdio</button>
               <button class="btn ghost sm danger hidden" data-studio-stop>⏻ Desligar estúdio</button>
@@ -872,8 +873,9 @@
 
     <div class="srv-card hidden" id="auto-card">
       <h4>⚡ Estúdio automático no Kaggle <small id="auto-user"></small></h4>
-      <p class="muted small">O app liga o estúdio sozinho quando você cria uma música, sem abrir o notebook. Leva uns 10–15 min para ligar e ele se desliga depois de 30 min sem uso, para economizar suas 30 h grátis da semana.</p>
+      <p class="muted small">O app liga o estúdio sozinho quando você cria uma música, sem abrir o notebook. Leva uns 4 min para ligar e ele se desliga depois de 30 min sem uso, para economizar suas 30 h grátis da semana.</p>
       <p class="small" id="auto-phase"></p>
+      <div class="quota hidden" id="kg-quota"></div>
       <div class="pane-actions">
         <button class="btn primary" id="auto-start">Ligar agora</button>
         <button class="btn ghost" id="auto-stop">Desligar</button>
@@ -881,7 +883,8 @@
     </div>
 
     <div class="srv-card">
-      <h4>🚀 Seu estúdio grátis no Kaggle <small>sem o limite diário do Hugging Face</small></h4>
+      <h4>🚀 Seu estúdio grátis no Kaggle <small>conexão atual</small></h4>
+      <details class="manual"><summary>Modo manual (avançado): ligar o notebook você mesma</summary>
       <ol class="srv-steps">
         <li>Crie uma conta grátis em <a href="https://www.kaggle.com/account/login?phase=startRegisterTab" target="_blank" rel="noopener">kaggle.com</a> e verifique seu telefone (Settings → Phone verification). Isso libera GPU e internet.</li>
         <li><a href="/kaggle/acaiamusic-estudio.ipynb" download><b>⬇ Baixe o notebook do estúdio</b></a>.</li>
@@ -889,6 +892,7 @@
         <li>No painel da direita: <b>Accelerator → GPU T4 x2</b> e <b>Internet → On</b>.</li>
         <li>Clique em <b>Run All</b>. Na primeira vez leva uns 10–15 min. No final aparece o <b>endereço</b> e a <b>chave</b>: cole aqui embaixo.</li>
       </ol>
+      </details>
       <div class="field">
         <label for="kg-url">Endereço do estúdio</label>
         <input id="kg-url" type="text" inputmode="url" autocomplete="off" placeholder="https://algo-aleatorio.trycloudflare.com" />

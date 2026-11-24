@@ -40,6 +40,17 @@ function kaggleCli(args, timeoutMs = 120000) {
 }
 
 // Usuário do Kaggle logado no PC (kaggle auth login)
+// Horas de GPU que ainda restam na semana (comando "kaggle quota"); guarda por 5 min
+let quotaCache = { at: 0, data: null };
+export async function kaggleQuota() {
+  if (Date.now() - quotaCache.at < 5 * 60000 && quotaCache.data) return quotaCache.data;
+  const r = await kaggleCli(["quota"], 60000);
+  const m = /GPU\s+([\d.]+)h\s+([\d.]+)h\s+([\d.]+)h\s+(\S+)/.exec(r.out);
+  const data = m ? { used: Number(m[1]), remaining: Number(m[2]), total: Number(m[3]), refreshAt: m[4] } : null;
+  if (data) quotaCache = { at: Date.now(), data };
+  return data;
+}
+
 export async function kaggleUser() {
   if (process.env.KAGGLE_USERNAME) return process.env.KAGGLE_USERNAME.trim(); // na nuvem: vem dos segredos do Space
   const r = await kaggleCli(["config", "view"], 30000);

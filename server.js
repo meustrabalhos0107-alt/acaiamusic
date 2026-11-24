@@ -10,7 +10,7 @@ import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, genera
 import { wavToMp3 } from "./audio.js";
 import { registerStudio } from "./studio.js";
 import { initSettings, getSettings, saveSettings, kaggleHealth, kaggleConfigured, generateKaggle, modalConfigured, modalStatus, wakeModal } from "./kaggle.js";
-import { initAuto, autoState, kaggleUser, startStudio, stopStudio } from "./kaggle-auto.js";
+import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio } from "./kaggle-auto.js";
 import { getLiturgy, massPlan } from "./liturgy.js";
 import { initPersist } from "./persist.js";
 
@@ -38,7 +38,7 @@ async function ensureStudio(onProgress) {
     console.log("Estúdio: a GPU ligou, trocando para ela:", gpuUrl);
     await saveSettings({ kaggleUrl: gpuUrl, kaggleCpu: false });
   });
-  await saveSettings({ kaggleUrl: url, kaggleKey: key, kaggleTopic: topic, kaggleCpu: cpu });
+  await saveSettings({ kaggleUrl: url, kaggleKey: key, kaggleTopic: topic, kaggleCpu: cpu, studioSince: Date.now() });
   for (let i = 0; i < 12; i++) {
     if ((await kaggleHealth()).ok) return true; // o túnel pode levar alguns segundos para responder
     await new Promise((r) => setTimeout(r, 5000));
@@ -802,7 +802,7 @@ app.delete("/api/songs/:id", async (req, res) => {
 app.get("/api/status", async (_req, res) => {
   const kaggle = kaggleConfigured() ? await kaggleHealth() : { ok: false, error: "não configurado" };
   const modal = modalStatus(); // não liga a GPU só para ver o status (economiza crédito)
-  const auto = { available: Boolean(KAGGLE_USER), user: KAGGLE_USER, ...autoState() };
+  const auto = { available: Boolean(KAGGLE_USER), user: KAGGLE_USER, ...autoState(), quota: KAGGLE_USER ? await kaggleQuota().catch(() => null) : null };
   res.json({ lyrics: true, music: Boolean(HF_TOKEN) || kaggle.ok || modal.ok || auto.available, kaggle, kaggleCpu: Boolean(getSettings().kaggleCpu), modal, auto, minSeconds: MIN_SECONDS, maxSeconds: MAX_SECONDS });
 });
 
@@ -819,9 +819,19 @@ app.post("/api/studio/stop", async (_req, res) => {
 });
 
 // Servidores de música próprios (Kaggle e Modal): ver, testar e salvar
-app.get("/api/settings", (_req, res) => {
+app.get("/api/settings", async (_req, res) => {
   const s = getSettings();
-  res.json({ kaggleUrl: s.kaggleUrl, hasKey: Boolean(s.kaggleKey), modalUrl: s.modalUrl, hasModalKey: Boolean(s.modalKey) });
+  const quota = KAGGLE_USER ? await kaggleQuota().catch(() => null) : null;
+  res.json({
+    kaggleUrl: s.kaggleUrl,
+    hasKey: Boolean(s.kaggleKey),
+    keyMasked: s.kaggleKey ? "•".repeat(10) + s.kaggleKey.slice(-4) : "",
+    kaggleCpu: Boolean(s.kaggleCpu),
+    studioSince: s.studioSince || 0,
+    quota,
+    modalUrl: s.modalUrl,
+    hasModalKey: Boolean(s.modalKey),
+  });
 });
 app.post("/api/settings", async (req, res) => {
   const b = req.body || {};
