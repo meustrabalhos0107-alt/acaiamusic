@@ -1,0 +1,22 @@
+# ACAIAMUSIC no Render.com (plano gratuito, sem cartão)
+services:
+  - type: web
+    name: acaiamusic
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /manifest.json
+    envVars:
+      - key: PORT
+        value: "7860"
+      - key: DATA_REPO
+        value: Agatha0107/acaiamusic-dados
+      # segredos: preenchidos pelo script de publicação, nunca no código
+      - key: HF_TOKEN
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: KAGGLE_USERNAME
+        sync: false
+      - key: KAGGLE_API_TOKEN
+        sync: false

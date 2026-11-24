@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- ACAIA = Agatha Caroline Albuquerque + Inteligência Artificial
+       5 barras de som (A·C·A rosa = Agatha · I·A azul = IA) sobem formando um "A";
+       no alto, a luz: "Ao Céu Ascende, Inteira, a Alma que canta" -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1140"/>
+      <stop offset="1" stop-color="#0f0a17"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset=".55" stop-color="#c026d3"/>
+      <stop offset="1" stop-color="#fb7185"/>
+    </linearGradient>
+    <linearGradient id="ia" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset=".55" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a5f3fc"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#fff7ed" stop-opacity=".95"/>
+      <stop offset=".35" stop-color="#fbcfe8" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#f472b6" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="a">
+      <!-- vão do "A": um corte horizontal atravessa as barras -->
+      <path d="M0 0H512V318H0zM0 344H512V512H0z"/>
+    </clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- halo / céu -->
+  <circle cx="256" cy="118" r="96" fill="url(#glow)"/>
+  <path d="M168 150a96 96 0 0 1 176 0" fill="none" stroke="#fbcfe8" stroke-opacity=".35" stroke-width="6" stroke-linecap="round"/>
+  <!-- as 5 barras: A · C · A (Agatha Caroline Albuquerque) · I · A (Inteligência Artificial) -->
+  <g clip-path="url(#a)">
+    <g fill="url(#bar)">
+      <rect x="92"  y="356" width="44" height="76" rx="22"/>
+      <rect x="160" y="262" width="44" height="170" rx="22"/>
+      <rect x="234" y="182" width="44" height="250" rx="22"/>
+    </g>
+    <g fill="url(#ia)">
+      <rect x="308" y="262" width="44" height="170" rx="22"/>
+      <rect x="376" y="356" width="44" height="76" rx="22"/>
+    </g>
+  </g>
+  <!-- a luz no alto (a alma que chega ao céu) -->
+  <path d="M256 74l9 27 27 9-27 9-9 27-9-27-27-9 27-9z" fill="#fff"/>
+  <circle cx="256" cy="110" r="5" fill="#fff"/>
+</svg>
