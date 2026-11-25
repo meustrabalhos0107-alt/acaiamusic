@@ -63,6 +63,7 @@ export function notebook(key, topic, cpu = false) {
 import os, re, time, json, subprocess, threading, queue, urllib.request
 KEY, TOPIC, IDLE_MIN, CPU = ${JSON.stringify(key)}, ${JSON.stringify(topic)}, ${IDLE_MIN}, ${cpu ? "True" : "False"}
 W = '/tmp/acaia'; os.makedirs(W, exist_ok=True); os.chdir(W)
+START = int(time.time()) - 5  # o pedido de desligar vale mesmo se chegar durante a instalação
 def ntfy(msg):
     try: urllib.request.urlopen(urllib.request.Request('https://ntfy.sh/' + TOPIC, data=msg.encode(), method='POST'), timeout=15)
     except Exception as e: print('ntfy falhou', e)
@@ -121,7 +122,7 @@ for _ in range(3):
     if tun: break
 if not tun: log('erro:Não consegui criar o endereço público.'); raise SystemExit(1)
 
-last_total, last_act, since = -1, time.time(), int(time.time())
+last_total, last_act, since = -1, time.time(), START
 while server.poll() is None:
     time.sleep(60)
     try:
@@ -197,7 +198,12 @@ export function startStudio(onProgress = () => {}, onUpgrade = () => {}) {
       const since = Math.floor(Date.now() / 1000) - 5;
       progress("Pedindo uma máquina grátis ao Kaggle…");
       const [g, c] = await Promise.all([pushKernel(user, SLUG, notebook(key, topic, false), true), pushKernel(user, SLUG_CPU, notebook(key, topic, true), false)]);
-      if (!g.ok && !c.ok) throw new Error("O Kaggle recusou: " + (c.out || g.out).split("\n").slice(-2).join(" ").slice(0, 300));
+      if (!g.ok && !c.ok) {
+        const out = c.out || g.out;
+        if (/access_token|api token|401|unauthori[sz]ed|credentials/i.test(out))
+          throw new Error("O token do Kaggle não foi aceito. Gere um novo em kaggle.com/settings → API → Generate New Token (começa com KGAT_) e publique de novo.");
+        throw new Error("O Kaggle recusou: " + out.split("\n").slice(-2).join(" ").slice(0, 300));
+      }
       if (!g.ok) console.log("GPU não pedida:", g.out.split("\n").pop());
       progress("Ligando o estúdio. A instalação leva uns 10–15 min…");
       const t0 = Date.now();

@@ -299,7 +299,11 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
   const startedAt = Date.now();
   let engine = "Hugging Face (gratuito)";
   const job = jobs.get(id);
-  const set = (patch) => Object.assign(job, patch, { updatedAt: Date.now() });
+  const set = (patch) => {
+    if (job.canceled) throw new Error("CANCELED");
+    Object.assign(job, patch, { updatedAt: Date.now() });
+  };
+  const softSet = (patch) => !job.canceled && Object.assign(job, patch, { updatedAt: Date.now() }); // não interrompe a ligação do estúdio
   try {
     set({ status: "connecting", message: "Conectando ao estúdio de IA…" });
     const seconds = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, duration));
@@ -320,16 +324,17 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       set({ status: "connecting", message: "Conectando ao seu estúdio no Kaggle…" });
       let h = { ok: false, error: "desligado" };
       try {
-        h = { ok: await ensureStudio((m) => set({ status: "connecting", message: `Ligando o seu estúdio grátis no Kaggle: ${m}` })) };
+        h = { ok: await ensureStudio((m) => softSet({ status: "connecting", message: `Ligando o seu estúdio grátis no Kaggle: ${m}` })) };
       } catch (e) {
         h = { ok: false, error: e.message };
-        set({ status: "connecting", message: `Kaggle: ${e.message.slice(0, 120)} · tentando os servidores gratuitos…` });
+        softSet({ status: "connecting", message: `Kaggle: ${e.message.slice(0, 120)} · tentando os servidores gratuitos…` });
       }
       if (h.ok) {
         try {
           raw = await generateKaggle({ params, options, language, reference }, set);
           engine = "Seu estúdio no Kaggle";
         } catch (e) {
+          if (job.canceled) throw e;
           console.log("Kaggle falhou, indo para os estúdios gratuitos:", e?.message);
         }
       } else console.log("Kaggle indisponível:", h.error);
@@ -342,11 +347,13 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
           raw = await generateKaggle({ params, options, language, reference }, set, "modal");
           engine = "Seu estúdio no Modal";
         } catch (e) {
+          if (job.canceled) throw e;
           console.log("Modal falhou, indo para os estúdios gratuitos:", e?.message);
         }
       } else console.log("Modal indisponível:", h.error);
     }
     // 2º: estúdio gratuito principal do Hugging Face
+    if (job.canceled) throw new Error("CANCELED");
     if (!raw && !reference && !resting(ACE_SPACE)) {
       try {
         const client = await getAce();
@@ -359,12 +366,14 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       }
     }
     // 3º: os outros estúdios gratuitos, um por um
+    if (job.canceled) throw new Error("CANCELED");
     if (!raw) {
       raw = await audioToBuffer(await generateOn15Spaces({ params, options, language, reference }, set));
       engine = "Hugging Face (gratuito)";
     }
     set({ status: "saving", message: "Masterizando e salvando em MP3…" });
     const { mp3, seconds: realSeconds } = wavToMp3(raw);
+    if (job.canceled) throw new Error("CANCELED");
     await fs.writeFile(path.join(SONGS_DIR, `${id}.mp3`), mp3);
 
     const song = {
@@ -400,11 +409,14 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     await updateSongs((songs) => [song, ...songs]);
     set({ status: "done", message: "Pronta!", song });
   } catch (e) {
+    if (job.canceled) return setCanceled(job);
     console.error("Erro música:", e?.message || e);
     if (/connect|fetch failed|ECONN/i.test(String(e?.message))) aceClient = null; // reconecta na próxima
     set({ status: "error", error: friendlyAceError(String(e?.message || e)) });
   }
 }
+
+const setCanceled = (job) => Object.assign(job, { status: "canceled", message: "Cancelada.", error: undefined, updatedAt: Date.now() });
 
 // ---------- Fila de criação (gravada em disco: continua mesmo se o app reiniciar) ----------
 // Cada música pedida vira uma tarefa. Se falhar, tenta de novo (até MAX_TRIES), sem travar as outras.
@@ -418,6 +430,14 @@ const saveQueue = () => fs.writeFile(QUEUE_FILE, JSON.stringify(queue)).catch(()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pumping = false;
 let currentTask = null;
+let cancelCurrent = null; // libera a espera da tarefa atual quando ela é cancelada
+let wake = () => {}; // acorda a fila quando ela está esperando uma nova tentativa
+const history = []; // últimas músicas que saíram da fila (prontas, com erro ou canceladas)
+function remember(t, status, extra = {}) {
+  history.unshift({ id: t.id, label: t.label || t.input?.plan?.title || "Música", status, at: Date.now(), ...extra });
+  history.length = Math.min(history.length, 12);
+}
+const queuePaused = () => Boolean(getSettings().queuePaused);
 
 function enqueueSong(id, input, extra = {}) {
   queue.push({ id, input, tries: 0, notBefore: 0, addedAt: Date.now(), ...extra });
@@ -437,11 +457,11 @@ async function pump() {
   if (pumping) return;
   pumping = true;
   try {
-    while (queue.length) {
+    while (queue.length && !queuePaused()) {
       const now = Date.now();
       const t = queue.find((q) => q.notBefore <= now);
       if (!t) {
-        await sleep(Math.min(...queue.map((q) => q.notBefore)) - now + 500);
+        await Promise.race([sleep(Math.min(...queue.map((q) => q.notBefore)) - now + 500), new Promise((r) => (wake = r))]);
         continue;
       }
       currentTask = t;
@@ -450,13 +470,25 @@ async function pump() {
       t.tries++;
       saveQueue();
       const run = chain.then(() => runJob(t.id, t.input));
-      chain = run;
-      await run;
+      chain = run.catch(() => {});
+      await Promise.race([run, new Promise((r) => (cancelCurrent = r))]);
+      cancelCurrent = null;
       currentTask = null;
       const j = jobs.get(t.id);
-      if (j?.status === "done") {
+      if (j?.canceled) {
         queue = queue.filter((q) => q !== t);
         saveQueue();
+        setCanceled(j);
+        remember(t, "canceled");
+        // se a música chegou a ficar pronta, é apagada quando o trabalho antigo terminar
+        run.then(async () => {
+          await fs.rm(path.join(SONGS_DIR, `${t.id}.mp3`), { force: true });
+          await updateSongs((songs) => songs.filter((x) => x.id !== t.id));
+        });
+      } else if (j?.status === "done") {
+        queue = queue.filter((q) => q !== t);
+        saveQueue();
+        remember(t, "done", { songId: j.song.id });
         if (t.setlist) await saveSetlistItem(t.setlist.id, t.setlist.i, { kind: "song", ref: j.song.id }).catch(() => {});
       } else if (t.tries < MAX_TRIES) {
         const waitMin = Math.min(10, t.tries * 2);
@@ -467,6 +499,7 @@ async function pump() {
       } else {
         queue = queue.filter((q) => q !== t);
         saveQueue();
+        remember(t, "error", { error: String(j?.error || "").slice(0, 200) });
       }
     }
   } finally {
@@ -474,9 +507,71 @@ async function pump() {
     currentTask = null;
   }
 }
-app.get("/api/queue", (_req, res) => {
+const queueView = () => {
   const cur = currentTask && jobs.get(currentTask.id);
-  res.json({ pending: queue.length, current: currentTask ? { label: currentTask.label || currentTask.input.plan.title, message: cur?.message || "" } : null });
+  const paused = queuePaused();
+  return {
+    pending: queue.length,
+    paused,
+    current: currentTask ? { id: currentTask.id, label: currentTask.label || currentTask.input.plan.title, message: cur?.message || "" } : null,
+    items: queue.map((q) => {
+      const j = jobs.get(q.id) || {};
+      const running = q === currentTask;
+      return {
+        id: q.id,
+        label: q.label || q.input?.plan?.title || "Música",
+        running,
+        message: running ? j.message || "Criando…" : q.notBefore > Date.now() ? j.message || "Aguardando nova tentativa…" : paused ? "Pausada" : "Na fila",
+        tries: q.tries,
+        maxTries: MAX_TRIES,
+        retryAt: !running && q.notBefore > Date.now() ? q.notBefore : 0,
+      };
+    }),
+    history,
+  };
+};
+app.get("/api/queue", (_req, res) => res.json(queueView()));
+// Pausar / retomar: a música que já está sendo criada termina; as próximas esperam
+app.post("/api/queue/pause", async (req, res) => {
+  const paused = req.body?.paused !== false;
+  await saveSettings({ queuePaused: paused });
+  wake();
+  if (!paused) {
+    markQueued();
+    pump();
+  }
+  res.json(queueView());
+});
+app.post("/api/queue/:id/cancel", (req, res) => {
+  const t = queue.find((q) => q.id === req.params.id);
+  if (!t) return res.status(404).json({ error: "Essa música não está mais na fila." });
+  const j = jobs.get(t.id) || jobs.set(t.id, { createdAt: Date.now() }).get(t.id);
+  j.canceled = true;
+  if (t === currentTask) cancelCurrent?.();
+  else {
+    queue = queue.filter((q) => q !== t);
+    saveQueue();
+    setCanceled(j);
+    remember(t, "canceled");
+    markQueued();
+  }
+  wake();
+  res.json(queueView());
+});
+// Tentar agora: tira a espera entre tentativas e põe a música na frente da fila
+app.post("/api/queue/:id/now", (req, res) => {
+  const t = queue.find((q) => q.id === req.params.id);
+  if (!t) return res.status(404).json({ error: "Essa música não está mais na fila." });
+  if (t !== currentTask) {
+    t.notBefore = 0;
+    const rest = queue.filter((q) => q !== t && q !== currentTask);
+    queue = currentTask && queue.includes(currentTask) ? [currentTask, t, ...rest] : [t, ...rest];
+    saveQueue();
+    markQueued();
+  }
+  wake();
+  pump();
+  res.json(queueView());
 });
 
 app.post("/api/songs", (req, res) => {
@@ -665,10 +760,10 @@ async function recordItems(setlistId, todo, b, set, job, idea) {
       const prev = k >= 0 ? job.items[k] : { i: t.i, moment: t.moment, title: t.plan.title };
       let next = prev;
       if (sj?.status === "done") next = { ...prev, kind: "song", songId: sj.song.id, error: undefined };
-      else if (sj?.status === "error") next = { ...prev, error: sj.error || "falhou" };
+      else if ((sj?.status === "error" || sj?.status === "canceled")) next = { ...prev, error: sj.error || "falhou" };
       if (k >= 0) job.items[k] = next;
       else job.items.push(next);
-      if (sj?.status === "done" || sj?.status === "error") finished++;
+      if (sj?.status === "done" || sj?.status === "error" || sj?.status === "canceled") finished++;
       else if (!msg && sj && sj.status !== "queued") msg = `${t.moment} (${n + 1}/${tasks.length}) · ${sj.message}`;
     }
     set({ step: base + finished, message: msg || `Na fila de criação · ${finished}/${tasks.length} prontas` });

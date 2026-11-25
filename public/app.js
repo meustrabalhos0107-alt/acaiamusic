@@ -784,7 +784,7 @@ $("#btn-song").onclick = async () => {
     for (;;) {
       await sleep(2000);
       const job = await api(`/api/jobs/${jobId}`);
-      if (job.status === "error") throw new Error(job.error);
+      if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
       $("#progress-text").textContent = job.message || "Trabalhando…";
       const target = PHASES[job.status] ?? pct;
       pct = job.status === "generating" ? Math.min(92, Math.max(target, 18 + ((Date.now() - t0) / 1000 / eta) * 74)) : Math.max(pct, target);
@@ -1197,7 +1197,7 @@ $("#sl-rec-go").onclick = async () => {
       $("#sl-rec-msg").textContent = j.status === "error" ? `⚠️ ${j.error}` : j.message;
       const done = (j.items || []).filter((x) => x.kind === "song" || x.error).length;
       $("#sl-rec-bar").style.width = Math.max(4, Math.round((done / (j.total || 1)) * 100)) + "%";
-      if (j.status === "error") throw new Error(j.error);
+      if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Música cancelada.");
       if (j.status === "done") {
         await Promise.all([loadSongs(), loadSetlists()]);
         const sl = state.setlists.find((s) => s.id === saved.id);
@@ -1731,7 +1731,7 @@ $("#ed-apply").onclick = async (ev) => {
     for (;;) {
       await sleep(1200);
       const job = await api(`/api/jobs/${jobId}`);
-      if (job.status === "error") throw new Error(job.error);
+      if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
       $("#ed-msg").textContent = job.message;
       $("#ed-bar").style.width = (job.status === "done" ? 100 : Math.min(90, 15 + ((Date.now() - t0) / 1000) * 6)) + "%";
       if (job.status === "done") {
@@ -2336,7 +2336,7 @@ $("#kk-mix").onclick = async (e) => {
     for (;;) {
       await sleep(1500);
       const j = await api(`/api/jobs/${jobId}`);
-      if (j.status === "error") throw new Error(j.error);
+      if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Música cancelada.");
       $("#kk-msg").textContent = j.message;
       $("#kk-bar").style.width = (j.status === "done" ? 100 : Math.min(92, 12 + ((Date.now() - t0) / 1000 / 30) * 80)) + "%";
       if (j.status === "done") {
@@ -2405,7 +2405,7 @@ $("#btn-stems").onclick = async (e) => {
     for (;;) {
       await sleep(4000);
       const job = await api(`/api/jobs/${r.jobId}`);
-      if (job.status === "error") throw new Error(job.error);
+      if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
       const pct = job.status === "done" ? 100 : Math.min(95, ((Date.now() - t0) / 1000 / eta) * 100);
       if (dlgSong?.id === song.id) {
         $("#stem-bar").style.width = pct + "%";
@@ -2714,9 +2714,9 @@ $("#btn-video").onclick = async (e) => {
     for (;;) {
       await sleep(1500);
       const job = await api(`/api/jobs/${jobId}`);
-      if (job.status === "error") throw new Error(job.error);
+      if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
       $("#video-msg").textContent = `${job.message} · ${fmt((Date.now() - t0) / 1000)}`;
-      $("#video-bar").style.width = (job.status === "done" ? 100 : Math.min(92, 10 + ((Date.now() - t0) / 1000 / 45) * 80)) + "%";
+      $("#video-bar").style.width = (job.status === "done" ? 100 : job.progress != null ? 8 + job.progress * 0.9 : Math.min(30, 5 + (Date.now() - t0) / 4000)) + "%";
       if (job.status === "done") {
         song.lastVideo = job.url;
         if (dlgSong?.id === song.id) {
@@ -3105,24 +3105,94 @@ async function refreshQueue() {
   clearTimeout(refreshQueue.t);
   try {
     const q = await api("/api/queue");
-    const pill = $("#queue-pill");
-    pill.classList.toggle("hidden", !q.pending);
-    if (q.pending) {
-      $("#queue-text").textContent = `🎵 Criando ${q.pending} música${q.pending > 1 ? "s" : ""}${q.current ? ` · ${q.current.label}` : ""}`;
-      pill.title = `${q.current?.message || "Na fila"}\nPode fechar o app: a criação continua até terminar.`;
-    }
+    renderQueue(q);
     if (q.pending < lastPending) {
       await Promise.all([loadSongs(), loadSetlists()]); // música nova pronta: atualiza a biblioteca e o repertório
       if ($("#view-library").classList.contains("active")) renderLibrary();
       if ($("#view-home").classList.contains("active")) renderHome();
     }
     lastPending = q.pending;
-    refreshQueue.t = setTimeout(refreshQueue, q.pending ? 10000 : 30000);
+    refreshQueue.t = setTimeout(refreshQueue, $("#queue-dialog").open ? 3000 : q.pending ? 10000 : 30000);
   } catch {
     refreshQueue.t = setTimeout(refreshQueue, 30000);
   }
 }
-$("#queue-pill").onclick = () => showView("library");
+const Q_ICON = { done: "✅", error: "⚠️", canceled: "🚫" };
+const Q_WORD = { done: "Pronta", error: "Não deu certo", canceled: "Cancelada" };
+function renderQueue(q) {
+  const pill = $("#queue-pill");
+  pill.classList.toggle("hidden", !q.pending);
+  pill.classList.toggle("paused", Boolean(q.paused));
+  if (q.pending) {
+    $("#queue-text").textContent = q.paused
+      ? `⏸ Fila pausada · ${q.pending} música${q.pending > 1 ? "s" : ""}${q.current ? " (terminando a atual)" : ""}`
+      : `🎵 Criando ${q.pending} música${q.pending > 1 ? "s" : ""}${q.current ? ` · ${q.current.label}` : ""}`;
+    pill.title = `${q.current?.message || "Na fila"}\nToque para pausar, cancelar ou ver a fila.`;
+  }
+  const pb = $("#qd-pause");
+  pb.textContent = q.paused ? "▶️ Retomar a fila" : "⏸ Pausar a fila";
+  pb.dataset.paused = q.paused ? "1" : "";
+  pb.classList.toggle("hidden", !q.pending && !q.paused);
+  $("#qd-list").innerHTML = q.items?.length
+    ? q.items
+        .map((it, k) => {
+          const wait = it.retryAt ? ` · nova tentativa às ${new Date(it.retryAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "";
+          const tries = it.tries > 1 || it.retryAt ? ` · tentativa ${Math.min(it.tries + (it.running ? 0 : 1), it.maxTries)} de ${it.maxTries}` : "";
+          return `<li class="${it.running ? "run" : ""}" data-id="${esc(it.id)}">
+            <span>${it.running ? "🎙️" : k + 1 + "."}</span>
+            <div class="qd-info"><b>${esc(it.label)}</b><small>${esc(it.message)}${esc(wait)}${esc(tries)}</small></div>
+            <div class="qd-act">
+              ${!it.running && (it.retryAt || k > 0) ? `<button class="btn ghost" data-q="now" title="Passar para a frente e tentar já">Agora</button>` : ""}
+              <button class="btn ghost" data-q="cancel">Cancelar</button>
+            </div></li>`;
+        })
+        .join("")
+    : `<li class="qd-empty">Nenhuma música na fila agora.</li>`;
+  const hist = q.history || [];
+  $("#qd-hist-title").classList.toggle("hidden", !hist.length);
+  $("#qd-hist").innerHTML = hist
+    .map(
+      (h) => `<li><span>${Q_ICON[h.status] || "•"}</span><div class="qd-info"><b>${esc(h.label)}</b><small>${Q_WORD[h.status] || h.status} · ${new Date(h.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${h.error ? " · " + esc(h.error) : ""}</small></div>${
+        h.songId ? `<div class="qd-act"><button class="btn ghost" data-open="${esc(h.songId)}">Ouvir</button></div>` : ""
+      }</li>`,
+    )
+    .join("");
+}
+async function openQueue() {
+  $("#queue-dialog").showModal();
+  refreshQueue();
+}
+$("#queue-pill").onclick = openQueue;
+$("#qd-pause").onclick = async (e) => {
+  const resume = Boolean(e.currentTarget.dataset.paused);
+  try {
+    renderQueue(await api("/api/queue/pause", { method: "POST", body: JSON.stringify({ paused: !resume }) }));
+    toast(resume ? "▶️ Fila retomada." : "⏸ Fila pausada. A música que já está sendo gravada termina; as próximas esperam.");
+  } catch (err) {
+    toast(err.message, true);
+  }
+};
+$("#queue-dialog").addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-open]");
+  if (open) {
+    const song = state.songs.find((s) => s.id === open.dataset.open);
+    if (song) ($("#queue-dialog").close(), play(song), openSong(song));
+    return;
+  }
+  const b = e.target.closest("[data-q]");
+  if (!b) return;
+  const li = b.closest("li");
+  const id = li.dataset.id;
+  if (b.dataset.q === "cancel" && !confirm(`Cancelar "${li.querySelector("b").textContent}"?`)) return;
+  b.disabled = true;
+  try {
+    renderQueue(await api(`/api/queue/${encodeURIComponent(id)}/${b.dataset.q}`, { method: "POST" }));
+    toast(b.dataset.q === "cancel" ? "🚫 Música cancelada." : "⏩ Vai ser a próxima.");
+  } catch (err) {
+    toast(err.message, true);
+    b.disabled = false;
+  }
+});
 refreshQueue();
 
 $("#auto-stop").onclick = stopStudioNow;
@@ -3248,7 +3318,7 @@ $("#md-go").onclick = async () => {
       $("#md-steps").innerHTML = (j.items || [])
         .map((it) => `<li class="${it.kind}"><i>${it.error ? "⚠️" : it.kind === "song" ? "🎵" : "📝"}</i>${esc(it.moment)}<small>${esc(it.error || it.title)}</small></li>`)
         .join("");
-      if (j.status === "error") throw new Error(j.error);
+      if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Música cancelada.");
       if (j.status === "done") {
         $("#md-bar").style.width = "100%";
         $("#md-done").classList.remove("hidden");

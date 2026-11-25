@@ -972,3 +972,18 @@ dialog.lyric-open { width: min(720px, 96vw); }
 }
 details.manual { margin: 6px 0 12px; font-size: 0.85rem; }
 details.manual summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+
+/* ===== Painel da fila de criação ===== */
+.queue-pill.paused { border-color: rgba(250, 204, 21, 0.5); box-shadow: 0 8px 26px rgba(250, 204, 21, 0.15); }
+.queue-pill.paused .qp-dot { background: #facc15; box-shadow: none; animation: none; }
+.qd-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+.qd-list li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--panel-2, #15151e); border: 1px solid var(--line, #26263a); }
+.qd-list li.run { border-color: rgba(244, 114, 182, 0.5); }
+.qd-info { flex: 1; min-width: 0; }
+.qd-info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qd-info small { display: block; color: var(--muted); font-size: 0.75rem; overflow-wrap: anywhere; }
+.qd-act { display: flex; gap: 6px; flex: none; }
+.qd-act .btn { padding: 6px 10px; font-size: 0.76rem; }
+.qd-sub { margin: 18px 0 0; font-size: 0.85rem; color: var(--muted); }
+.qd-hist li { opacity: 0.85; }
+.qd-empty { color: var(--muted); font-size: 0.85rem; }

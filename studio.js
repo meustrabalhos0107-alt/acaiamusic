@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
 import { encodeMp3, mixTracks, parseWav } from "./audio.js";
@@ -67,17 +67,28 @@ function demucs(mp3Buffer, token, onStatus) {
 
 // ---------- ffmpeg ----------
 // Roda o ffmpeg com limite de tempo: se travar, é encerrado e a fila segue
-function ffmpeg(args, timeoutMs = 5 * 60 * 1000) {
+// onTime(segundos) recebe o andamento (para mostrar a porcentagem)
+function ffmpeg(args, timeoutMs = 5 * 60 * 1000, onTime) {
   return new Promise((resolve, reject) => {
-    execFile(
-      ffmpegPath,
-      ["-hide_banner", "-loglevel", "error", "-y", ...args],
-      { maxBuffer: 1 << 24, timeout: timeoutMs, killSignal: "SIGKILL", windowsHide: true },
-      (err, _o, stderr) => {
-        if (err?.killed) return reject(new Error("a montagem demorou demais e foi cancelada"));
-        err ? reject(new Error(stderr || err.message)) : resolve();
-      },
-    );
+    const p = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y", ...args], { windowsHide: true });
+    let stderr = "", buf = "", killed = false;
+    const t = setTimeout(() => ((killed = true), p.kill("SIGKILL")), timeoutMs);
+    p.stdout.on("data", (d) => {
+      buf += d;
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const l of lines) {
+        const m = /^out_time_us=(\d+)/.exec(l);
+        if (m && onTime) onTime(Number(m[1]) / 1e6);
+      }
+    });
+    p.stderr.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
+    p.on("error", (e) => (clearTimeout(t), reject(e)));
+    p.on("close", (code) => {
+      clearTimeout(t);
+      if (killed) return reject(new Error("a montagem demorou demais e foi cancelada"));
+      code === 0 ? resolve() : reject(new Error(stderr.trim() || `ffmpeg saiu com código ${code}`));
+    });
   });
 }
 
@@ -151,8 +162,18 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     const L = b.layout || {};
     const wave = { x: int(L.wave?.x, 0, W, 40), y: int(L.wave?.y, 0, H, H - 360), w: int(L.wave?.w, 16, W, W - 80), h: int(L.wave?.h, 16, H, 150) };
     const bar = { x: int(L.bar?.x, 0, W, 40), y: int(L.bar?.y, 0, H, H - 170), w: int(L.bar?.w, 16, W, W - 80), h: int(L.bar?.h, 2, 40, 8) };
-    wave.w -= wave.w % 2;
-    wave.h -= wave.h % 4;
+    // O servidor grátis tem pouca CPU e memória: o vídeo sai em 2/3 do tamanho da arte (480p,
+    // ótimo para o Status), 20 quadros/s e codificação leve. Antes, em 720p/30 fps, o ffmpeg
+    // acumulava memória até travar e era cancelado.
+    const k = 2 / 3, FPS = 20;
+    const sc = (v) => Math.round(v * k);
+    const even = (v) => v - (v % 2);
+    const OW = even(sc(W) + 1), OH = even(sc(H) + 1);
+    for (const o of [wave, bar]) for (const p of ["x", "y", "w", "h"]) o[p] = sc(o[p]);
+    wave.w = even(Math.max(16, wave.w));
+    wave.h = Math.max(16, wave.h - (wave.h % 4));
+    bar.w = even(Math.max(16, bar.w));
+    bar.h = Math.max(2, even(bar.h));
     const half = wave.h / 2;
 
     const { id, set } = newJob();
@@ -165,30 +186,38 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
         mkdirSync(dir, { recursive: true });
         const name = `video-${vertical ? "vertical" : "horizontal"}-${start}.mp4`;
         const filter = [
-          `[0:v]scale=${W}:${H},format=rgba,fade=t=in:st=0:d=0.8,fade=t=out:st=${len - 1}:d=1[bg]`,
-          `[1:a]atrim=0:${len},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1,afade=t=out:st=${len - 2}:d=2,asplit=2[aout][av]`,
+          `[0:v]scale=${OW}:${OH},setsar=1,format=yuv420p,fade=t=in:st=0:d=0.8,fade=t=out:st=${len - 1}:d=1[bg]`,
+          `[1:a]atrim=0:${len},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1,afade=t=out:st=${len - 2}:d=2,aformat=channel_layouts=stereo,asplit=2[aout][av]`,
           // equalizador (barras de frequência) com reflexo
-          `[av]aformat=channel_layouts=mono,showfreqs=s=${wave.w}x${half}:mode=bar:ascale=cbrt:fscale=log:colors=0xf472b6:win_size=2048,fps=30,format=rgba,split[f1][f2]`,
+          `[av]aformat=channel_layouts=mono,showfreqs=s=${wave.w}x${half}:mode=bar:ascale=cbrt:fscale=log:colors=0xf472b6:win_size=1024:rate=${FPS},format=yuva420p,split[f1][f2]`,
           `[f2]vflip,colorchannelmixer=aa=0.3[f2r]`,
           `[f1][f2r]vstack[wv]`,
-          `[bg][wv]overlay=${wave.x}:${wave.y}:shortest=1[v1]`,
-          // barra de progresso: o preenchimento anda dentro do trilho (tudo com duração definida)
-          `color=c=white@0.2:s=${bar.w}x${bar.h}:r=30:d=${len},format=rgba[track]`,
-          `color=c=0xec4899:s=${bar.w}x${bar.h}:r=30:d=${len}[fill]`,
+          // barra de progresso: o preenchimento anda dentro do trilho
+          `color=c=white@0.2:s=${bar.w}x${bar.h}:r=${FPS}:d=${len},format=yuva420p[track]`,
+          `color=c=0xec4899:s=${bar.w}x${bar.h}:r=${FPS}:d=${len}[fill]`,
           `[track][fill]overlay=x='-w+w*t/${len}':y=0:shortest=1[barv]`,
-          `[v1][barv]overlay=${bar.x}:${bar.y}:shortest=1[v2]`,
-          `[v2]format=yuv420p[vout]`,
+          `[bg][wv]overlay=${wave.x}:${wave.y}:shortest=1[v1]`,
+          `[v1][barv]overlay=${bar.x}:${bar.y}:shortest=1,format=yuv420p[vout]`,
         ].join(";");
-        await ffmpeg([
-          "-loop", "1", "-framerate", "30", "-t", String(len), "-i", tmp,
-          "-ss", String(start), "-t", String(len), "-i", path.join(SONGS_DIR, `${song.id}.mp3`),
-          "-filter_complex", filter,
-          "-map", "[vout]", "-map", "[aout]",
-          "-t", String(len), "-r", "30", "-shortest", "-max_muxing_queue_size", "1024",
-          "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-maxrate", "1600k", "-bufsize", "3200k", "-profile:v", "high",
-          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
-          path.join(dir, name),
-        ]);
+        let lastPct = -1;
+        await ffmpeg(
+          [
+            "-threads", "1", "-filter_complex_threads", "1",
+            "-loop", "1", "-framerate", String(FPS), "-t", String(len), "-i", tmp,
+            "-ss", String(start), "-t", String(len), "-i", path.join(SONGS_DIR, `${song.id}.mp3`),
+            "-filter_complex", filter,
+            "-map", "[vout]", "-map", "[aout]",
+            "-t", String(len), "-r", String(FPS),
+            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage", "-crf", "28", "-threads", "1",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+            path.join(dir, name),
+          ],
+          20 * 60 * 1000,
+          (secs) => {
+            const pct = Math.min(99, Math.floor((secs / len) * 100));
+            if (pct !== lastPct) set({ status: "generating", message: `Montando o vídeo… ${pct}%`, progress: pct }), (lastPct = pct);
+          },
+        );
         const url = `/audio/media/${song.id}/${name}`;
         set({ status: "done", message: "Vídeo pronto!", url });
       } catch (e) {
