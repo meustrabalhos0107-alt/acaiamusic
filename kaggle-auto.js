@@ -178,6 +178,45 @@ async function pushKernel(user, slug, nb, gpu) {
   return { ok: r.code === 0 && /successfully pushed/i.test(r.out), out: r.out };
 }
 
+// Pede a máquina com GPU. Uma versão antiga presa na fila do Kaggle (às vezes fica horas lá) ocupa
+// uma das 2 vagas de GPU e faz o Kaggle recusar a nova: nesse caso ela é apagada e o pedido refeito.
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+async function pushGpu(user, nb) {
+  const ref = `${user}/${SLUG}`;
+  const st = await kaggleCli(["kernels", "status", ref], 60000);
+  if (/QUEUED/i.test(st.out)) {
+    console.log("Kaggle: GPU antiga presa na fila, apagando para pedir de novo");
+    await kaggleCli(["kernels", "delete", "-y", ref], 60000);
+    await sleepMs(5000);
+  }
+  let r = await pushKernel(user, SLUG, nb, true);
+  if (!r.ok && /session count|maximum.*gpu/i.test(r.out)) {
+    console.log("Kaggle: limite de sessões de GPU, liberando a antiga e tentando de novo");
+    await kaggleCli(["kernels", "delete", "-y", ref], 60000);
+    await sleepMs(5000);
+    r = await pushKernel(user, SLUG, nb, true);
+  }
+  return r;
+}
+
+// Estúdio rodando no modo processador (lento): pede a GPU com a mesma chave e o mesmo canal; quando
+// ela ligar, onUpgrade({url}) troca para ela e o modo processador se desliga sozinho.
+let upgrading = false;
+export async function requestGpu(key, topic, onUpgrade) {
+  if (upgrading) return { ok: true, already: true };
+  const user = await kaggleUser();
+  if (!user) return { ok: false };
+  const since = Math.floor(Date.now() / 1000) - 5;
+  const r = await pushGpu(user, notebook(key, topic, false));
+  if (!r.ok) {
+    console.log("Kaggle: GPU ainda indisponível:", r.out.split("\n").pop());
+    return { ok: false };
+  }
+  upgrading = true;
+  watchUpgrade(topic, since, onUpgrade).finally(() => (upgrading = false));
+  return { ok: true };
+}
+
 // opts.resume: um pedido já feito antes de o app reiniciar ({ key, topic, since, at, gpu, cpu }):
 //   continua esperando ESSAS máquinas em vez de pedir outras (que recomeçariam a instalação do zero).
 // opts.onPushed(pedido): chamado logo depois de pedir as máquinas, para o app guardar o pedido.
@@ -208,7 +247,7 @@ export function startStudio(onProgress = () => {}, onUpgrade = () => {}, opts = 
         topic = "acaia-" + randomBytes(12).toString("hex");
         since = Math.floor(Date.now() / 1000) - 5;
         progress("Pedindo uma máquina grátis ao Kaggle…");
-        [g, c] = await Promise.all([pushKernel(user, SLUG, notebook(key, topic, false), true), pushKernel(user, SLUG_CPU, notebook(key, topic, true), false)]);
+        [g, c] = await Promise.all([pushGpu(user, notebook(key, topic, false)), pushKernel(user, SLUG_CPU, notebook(key, topic, true), false)]);
         if (!g.ok && !c.ok) {
           const out = c.out || g.out;
           if (/access_token|api token|401|unauthori[sz]ed|credentials/i.test(out))
@@ -243,7 +282,7 @@ export function startStudio(onProgress = () => {}, onUpgrade = () => {}, opts = 
             return { url: gpuUrl.message.slice(4), key, topic, cpu: false };
           }
           progress("Estúdio ligado (modo processador: mais lento, mas sem fila)!");
-          if (g.ok) watchUpgrade(topic, since, onUpgrade);
+          if (g.ok && !upgrading) (upgrading = true), watchUpgrade(topic, since, onUpgrade).finally(() => (upgrading = false));
           return { url: cpuUrl.message.slice(7), key, topic, cpu: true };
         }
         const last = msgs.filter((m) => m.message.startsWith("log:") && !m.message.startsWith("log:erro")).pop();

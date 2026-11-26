@@ -10,7 +10,7 @@ import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, genera
 import { wavToMp3 } from "./audio.js";
 import { registerStudio } from "./studio.js";
 import { initSettings, getSettings, saveSettings, kaggleHealth, kaggleConfigured, generateKaggle, modalConfigured, modalStatus, wakeModal } from "./kaggle.js";
-import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio } from "./kaggle-auto.js";
+import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio, requestGpu } from "./kaggle-auto.js";
 import { getLiturgy, massPlan } from "./liturgy.js";
 import { initPersist } from "./persist.js";
 
@@ -29,15 +29,25 @@ let KAGGLE_USER = null;
 kaggleUser().then((u) => {
   KAGGLE_USER = u;
   if (u) console.log(`Kaggle: conta ${u} — o estúdio liga sozinho quando precisar`);
+  if (u) setTimeout(tryGpu, 20000);
 });
+const onGpuUp = async ({ url: gpuUrl }) => {
+  console.log("Estúdio: a GPU ligou, trocando para ela:", gpuUrl);
+  await saveSettings({ kaggleUrl: gpuUrl, kaggleCpu: false });
+};
+// Estúdio no modo processador (lento)? Tenta conseguir a GPU de novo a cada 20 min e troca sozinho.
+async function tryGpu() {
+  const s = getSettings();
+  if (!KAGGLE_USER || !s.kaggleCpu || !s.kaggleTopic || !s.kaggleKey) return;
+  if (!(await kaggleHealth()).ok) return; // estúdio já desligou: o próximo pedido liga um novo
+  await requestGpu(s.kaggleKey, s.kaggleTopic, onGpuUp).catch((e) => console.log("Kaggle: pedido de GPU falhou:", e.message));
+}
+setInterval(() => tryGpu(), 20 * 60 * 1000).unref();
 // Liga o estúdio no Kaggle (se ainda não estiver no ar) e guarda endereço e chave
 async function ensureStudio(onProgress) {
   if (kaggleConfigured() && (await kaggleHealth()).ok) return true;
   if (!KAGGLE_USER) return false;
-  const onUpgrade = async ({ url: gpuUrl }) => {
-    console.log("Estúdio: a GPU ligou, trocando para ela:", gpuUrl);
-    await saveSettings({ kaggleUrl: gpuUrl, kaggleCpu: false });
-  };
+  const onUpgrade = onGpuUp;
   // Pedido feito antes de o app reiniciar (o Render grátis reinicia às vezes): continua esperando
   // as mesmas máquinas, em vez de pedir outras e recomeçar a instalação do zero.
   const pending = getSettings().pendingStudio;
