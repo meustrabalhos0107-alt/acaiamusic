@@ -52,6 +52,7 @@ def estudio():
         ACESTEP_LM_BACKEND="pt",
         ACESTEP_CHECKPOINTS_DIR="/models",
         HF_HOME="/models/hf",
+        ACESTEP_GENERATION_TIMEOUT="3600",
     )
     subprocess.Popen(["uv", "run", "acestep-api"], cwd="/app", env=env)
 
