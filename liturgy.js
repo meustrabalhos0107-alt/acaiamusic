@@ -101,9 +101,12 @@ export function massPlan(lit) {
   const noGloria = /advento|quaresma/i.test(lit.season) && !/solenidade|imaculada/i.test(lit.title);
   const lent = /quaresma|semana santa/i.test(lit.season);
   const items = [
+    { moment: "Acolhida", reading: gospel },
     { moment: "Entrada", reading: [A.entrance && `Antífona de entrada: ${A.entrance}`, gospel].filter(Boolean).join("\n\n") },
+    { moment: "Aspersão", reading: gospel },
     { moment: "Ato Penitencial (Kyrie)" },
     !noGloria && { moment: "Glória" },
+    { moment: "Bíblia (Entrada da Palavra)", reading: gospel },
     R.psalm && { moment: "Salmo Responsorial", idea: `Use EXATAMENTE este refrão do salmo do dia: "${R.psalm.refrain}"`, reading: `${R.psalm.ref} — Refrão: ${R.psalm.refrain}\n${R.psalm.text}` },
     R.acclamation && {
       // texto litúrgico: refrão (Aleluia ou, na Quaresma, louvor a Cristo) + o versículo do dia, sem invenção
@@ -129,6 +132,8 @@ export function massPlan(lit) {
     { moment: "Santo" },
     { moment: "Cordeiro de Deus" },
     { moment: "Comunhão", reading: [A.communion && `Antífona da comunhão: ${A.communion}`, gospel].filter(Boolean).join("\n\n") },
+    { moment: "Ação de Graças (Pós-Comunhão)", reading: gospel },
+    { moment: "Aniversário" },
     { moment: "Final (Envio)", reading: gospel },
   ].filter(Boolean);
   return items.map((it) => ({ ...it, reading: (it.reading || "").slice(0, 3800) }));

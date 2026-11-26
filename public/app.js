@@ -2714,6 +2714,15 @@ function kkFinish() {
   $("#kk-review").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 $("#kk-stop").onclick = kkStop;
+// descarta a gravação (voz pura) sem juntar
+$("#kk-discard").onclick = () => {
+  if (!confirm("Excluir esta gravação? Ela ainda não foi salva.")) return;
+  if ($("#kk-raw").src) URL.revokeObjectURL($("#kk-raw").src);
+  $("#kk-raw").removeAttribute("src");
+  if (kk) kk.blob = null;
+  $("#kk-review").classList.add("hidden");
+  toast("Gravação excluída.");
+};
 $("#kk-again").onclick = () => {
   $("#kk-review").classList.add("hidden");
   $("#kk-rec").click();
@@ -2750,6 +2759,21 @@ $("#kk-mix").onclick = async (e) => {
         $("#kk-dl").href = j.song.url;
         $("#kk-dl").download = `${safeName(j.song.title)}.mp3`;
         $("#kk-open").onclick = () => openSong(j.song);
+        // apaga a versão cantada (a música que foi salva na biblioteca)
+        $("#kk-del").onclick = async () => {
+          if (!confirm(`Excluir “${j.song.title}” da biblioteca?`)) return;
+          try {
+            await api(`/api/songs/${j.song.id}`, { method: "DELETE" });
+          } catch (err) {
+            return toast(err.message, true);
+          }
+          state.songs = state.songs.filter((s) => s.id !== j.song.id);
+          updateCount();
+          if (state.current?.id === j.song.id) closePlayer();
+          $("#kk-out").removeAttribute("src");
+          $("#kk-result").classList.add("hidden");
+          toast("Versão cantada excluída.");
+        };
         $("#kk-result").classList.remove("hidden");
         $("#kk-result").scrollIntoView({ behavior: "smooth", block: "nearest" });
         toast("🎤 Sua versão foi gravada e salva na biblioteca!", false, 5000);

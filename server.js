@@ -571,7 +571,8 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       sections: plan.sections,
       references: plan.references,
       notes: plan.notes,
-      ...(audioChords ? { chords: audioChords } : plan.chords && !old ? { chords: plan.chords } : {}),
+      // com o ouvido ligado, a cifra vem do áudio (logo abaixo); a da IA só fica sem ele
+      ...(audioChords ? { chords: audioChords } : plan.chords && !old && !(sung && hearingUrl()) ? { chords: plan.chords } : {}),
       ...(pron?.heard ? { hearing: { words: pron.heard.words, chords: pron.heard.chords, key: pron.heard.key, tempo: pron.heard.tempo } } : {}),
       ...(reference ? { reference: String(reference.name || "").slice(0, 120) } : {}),
       genre: options.genre,
@@ -602,6 +603,18 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     if (job.attempt !== attempt) throw new Error("SUPERSEDED");
     await updateSongs((songs) => (old && songs.some((x) => x.id === outId) ? songs.map((x) => (x.id === outId ? song : x)) : [song, ...songs]));
     set({ status: "done", message: pron?.score != null ? `Pronta! Pronúncia: ${pron.score}% da letra entendida.` : "Pronta!", song });
+    // Cifra tirada da própria música: o ouvido (Whisper + acordes) escuta em segundo plano, sem atrasar a fila
+    if (!audioChords && sung && hearingUrl()) {
+      listen(mp3, language)
+        .then(async (heard) => {
+          const chords = chordSheetFromAudio(order, heard);
+          const hearing = { words: heard.words, chords: heard.chords, key: heard.key, tempo: heard.tempo };
+          const pronunciation = lyricScore(sung, heard.text);
+          await updateSongs((songs) => songs.map((x) => (x.id === outId ? { ...x, hearing, ...(chords ? { chords } : {}), spec: { ...x.spec, pronunciation } } : x)));
+          console.log(`Cifra do áudio pronta: "${plan.title}" (tom ${heard.key}, pronúncia ${pronunciation}%)`);
+        })
+        .catch((e) => console.log("Cifra automática pelo áudio falhou:", e.message));
+    }
   } catch (e) {
     if (job.canceled) return setCanceled(job);
     if (job.attempt !== attempt) return console.log("Tentativa antiga encerrada:", e?.message || e);
@@ -1172,7 +1185,8 @@ app.post("/api/mass-ready", async (req, res) => {
       let lyr = p.fixed ? cleanPlan(p.fixed, false) : null;
       for (let t = 0; t < 4 && !lyr; t++) {
         try {
-          lyr = await writeLyrics({ idea: p.idea || `Inspire-se na liturgia de hoje: ${lit.title}`, options: o, language: "pt", duration });
+          // cantos compostos: no mínimo refrão + 3 estrofes (o tamanho "completo" do compositor)
+          lyr = await writeLyrics({ idea: p.idea || `Inspire-se na liturgia de hoje: ${lit.title}`, options: o, language: "pt", duration: Math.max(duration, 200) });
         } catch (e) {
           if (!(e instanceof LyricsError) || t === 3) throw e;
           const wait = (e.retryAfter || 20) + 2;
