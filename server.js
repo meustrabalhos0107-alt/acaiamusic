@@ -852,6 +852,93 @@ app.delete("/api/setlists/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Álbuns (coleções de músicas da biblioteca) ----------
+// Cada Missa pronta vira um álbum sozinha (com as músicas já gravadas dela, na ordem da Missa).
+// Um álbum automático apagado não volta: o repertório fica na lista "dismissed".
+const ALBUMS_DB = path.join(DATA_DIR, "albums.json");
+async function loadAlbumsDb() {
+  try {
+    const j = JSON.parse(await fs.readFile(ALBUMS_DB, "utf8"));
+    return { albums: Array.isArray(j.albums) ? j.albums : [], dismissed: Array.isArray(j.dismissed) ? j.dismissed : [] };
+  } catch {
+    return { albums: [], dismissed: [] };
+  }
+}
+let albumWriting = Promise.resolve();
+function updateAlbums(fn) {
+  const run = albumWriting.then(async () => {
+    const db = fn(await loadAlbumsDb()) || {};
+    await fs.writeFile(ALBUMS_DB, JSON.stringify(db, null, 2));
+    return db;
+  });
+  albumWriting = run.catch(() => {});
+  return run;
+}
+const ALBUM_COLORS = ["#7c3aed", "#db2777", "#ea580c", "#0891b2", "#16a34a", "#ca8a04", "#4f46e5", "#be123c"];
+const cleanAlbum = (b, songIds) => ({
+  title: String(b.title || "Novo álbum").trim().slice(0, 100) || "Novo álbum",
+  description: String(b.description || "").trim().slice(0, 600),
+  color: ALBUM_COLORS.includes(b.color) ? b.color : ALBUM_COLORS[0],
+  songIds: [...new Set((Array.isArray(b.songIds) ? b.songIds : []).map(String))].filter((id) => songIds.has(id)).slice(0, 300),
+});
+// cria/atualiza os álbuns das Missas prontas e tira músicas que não existem mais
+async function syncAlbums() {
+  const [setlists, songs] = await Promise.all([loadSetlists(), loadSongs()]);
+  const ids = new Set(songs.map((s) => s.id));
+  const db = await loadAlbumsDb();
+  let changed = false;
+  for (const a of db.albums) {
+    const keep = a.songIds.filter((id) => ids.has(id));
+    if (keep.length !== a.songIds.length) (a.songIds = keep), (changed = true);
+  }
+  for (const sl of setlists) {
+    if (!/Missa pronta/i.test(sl.notes || "") || db.dismissed.includes(sl.id)) continue;
+    const recorded = sl.items.filter((it) => it.kind === "song" && ids.has(it.ref)).map((it) => it.ref);
+    if (!recorded.length) continue;
+    let a = db.albums.find((x) => x.setlistId === sl.id);
+    if (!a) {
+      a = { id: randomUUID(), title: sl.title, description: sl.notes.replace(/ · Montada pela Missa pronta do ACAIAMUSIC$/, ""), color: ALBUM_COLORS[db.albums.length % ALBUM_COLORS.length], songIds: [], setlistId: sl.id, removed: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      db.albums.unshift(a);
+      changed = true;
+    }
+    for (const id of recorded) if (!a.songIds.includes(id) && !(a.removed || []).includes(id)) (a.songIds.push(id), (changed = true));
+  }
+  if (changed) await updateAlbums(() => db);
+  return db.albums;
+}
+app.get("/api/albums", async (_req, res) => res.json(await syncAlbums()));
+app.post("/api/albums", async (req, res) => {
+  const ids = new Set((await loadSongs()).map((s) => s.id));
+  const now = new Date().toISOString();
+  const album = { id: randomUUID(), ...cleanAlbum(req.body || {}, ids), removed: [], createdAt: now, updatedAt: now };
+  if (!req.body?.color) album.color = ALBUM_COLORS[Math.floor(Math.random() * ALBUM_COLORS.length)];
+  await updateAlbums((db) => ({ ...db, albums: [album, ...db.albums] }));
+  res.json(album);
+});
+app.put("/api/albums/:id", async (req, res) => {
+  const ids = new Set((await loadSongs()).map((s) => s.id));
+  let updated = null;
+  await updateAlbums((db) => ({
+    ...db,
+    albums: db.albums.map((a) => {
+      if (a.id !== req.params.id) return a;
+      const next = cleanAlbum({ ...a, ...req.body }, ids);
+      // música tirada de um álbum de Missa não volta sozinha
+      const removed = [...new Set([...(a.removed || []), ...a.songIds.filter((x) => !next.songIds.includes(x))])].filter((x) => !next.songIds.includes(x));
+      return (updated = { ...a, ...next, removed, updatedAt: new Date().toISOString() });
+    }),
+  }));
+  if (!updated) return res.status(404).json({ error: "Álbum não encontrado." });
+  res.json(updated);
+});
+app.delete("/api/albums/:id", async (req, res) => {
+  await updateAlbums((db) => {
+    const a = db.albums.find((x) => x.id === req.params.id);
+    return { albums: db.albums.filter((x) => x.id !== req.params.id), dismissed: a?.setlistId ? [...new Set([...db.dismissed, a.setlistId])] : db.dismissed };
+  });
+  res.json({ ok: true });
+});
+
 // ---------- Gravar as músicas dos cantos que estão só com letra ----------
 const saveSetlistItem = (setlistId, i, patch) =>
   updateSetlists((list) => list.map((s) => (s.id === setlistId ? { ...s, items: s.items.map((it, k) => (k === i ? { ...it, ...patch } : it)), updatedAt: new Date().toISOString() } : s)));

@@ -1061,3 +1061,63 @@ dialog::backdrop { background: rgba(4,4,7,0.72); backdrop-filter: blur(10px) sat
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
+
+/* ===================== Álbuns ===================== */
+.albums { animation: albIn 0.3s var(--ease, ease) both; }
+@keyframes albIn { from { opacity: 0; transform: translateY(6px); } }
+.alb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
+.alb-card { position: relative; padding: 11px 11px 13px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); cursor: pointer; text-align: left; color: inherit; font: inherit; transition: transform 0.28s var(--ease, ease), border-color 0.2s, background 0.2s; }
+.alb-card:hover { transform: translateY(-3px); border-color: var(--line-2); background: var(--panel-2); }
+.alb-card strong { display: block; font-size: 0.95rem; margin-top: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alb-card small { display: block; color: var(--muted); font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alb-card .fab { position: absolute; right: 19px; bottom: 62px; z-index: 3; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--grad); display: grid; place-items: center; opacity: 0; transform: translateY(6px); transition: 0.18s; box-shadow: 0 8px 20px rgba(0,0,0,0.5); }
+.alb-card:hover .fab { opacity: 1; transform: none; }
+.alb-card .fab svg { fill: #fff; width: 20px; height: 20px; }
+/* capa: disco saindo da capinha, na cor do álbum */
+.alb-cover { position: relative; display: block; width: 100%; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--alb, #7c3aed) 70%, #fff 0%), var(--alb, #7c3aed) 45%, #0d0a14 120%); box-shadow: 6px 0 0 -2px color-mix(in srgb, var(--alb, #7c3aed) 45%, #000), 12px 0 0 -4px color-mix(in srgb, var(--alb, #7c3aed) 25%, #000); }
+.alb-cover svg.art { position: absolute; inset: 0; width: 100%; height: 100%; }
+.alb-mosaic { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.alb-mosaic svg.art { position: relative; width: 100%; height: 100%; }
+.alb-disc { position: absolute; left: 10px; bottom: 10px; z-index: 2; font-size: 1.05rem; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: rgba(0,0,0,0.55); backdrop-filter: blur(6px); }
+.alb-cover.lg { width: 190px; height: 190px; flex-shrink: 0; border-radius: 18px; box-shadow: 0 20px 50px rgba(0,0,0,0.5), 10px 0 0 -3px color-mix(in srgb, var(--alb, #7c3aed) 45%, #000); }
+.alb-new .alb-cover { background: var(--panel-2); border: 2px dashed var(--line-2); box-shadow: none; display: grid; place-items: center; }
+.alb-new .alb-cover b { font-size: 2.6rem; font-weight: 300; color: var(--muted); }
+.alb-new:hover .alb-cover b { color: var(--text); }
+.alb-hint { margin-top: 14px; }
+.alb-back { margin-bottom: 14px; }
+.alb-head { display: flex; gap: 26px; align-items: flex-end; margin-bottom: 26px; flex-wrap: wrap; }
+.alb-head > div:not(.alb-cover) { flex: 1; min-width: 240px; }
+.alb-head h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); letter-spacing: -0.03em; margin: 4px 0 6px; }
+.alb-head p { margin: 0 0 6px; }
+.alb-tracks { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.alb-tracks li { display: grid; grid-template-columns: 28px 48px 1fr auto auto; gap: 12px; align-items: center; padding: 8px 10px; border-radius: 12px; transition: background 0.15s; }
+.alb-tracks li:hover { background: var(--panel-2); }
+.alb-tracks li.playing { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+.alb-n { color: var(--dim); font-family: var(--mono); font-size: 0.85rem; text-align: right; }
+.alb-t { background: none; border: 0; color: inherit; text-align: left; padding: 0; cursor: pointer; min-width: 0; font: inherit; }
+.alb-t strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alb-t small { color: var(--muted); font-size: 0.76rem; }
+.alb-d { color: var(--muted); font-family: var(--mono); font-size: 0.8rem; }
+.alb-ops { display: flex; gap: 4px; opacity: 0.35; transition: opacity 0.15s; }
+.alb-tracks li:hover .alb-ops { opacity: 1; }
+.alb-ops button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+.alb-ops button:hover:not(:disabled) { border-color: var(--accent); }
+.alb-ops button:disabled { opacity: 0.3; cursor: default; }
+@media (max-width: 640px) {
+  .alb-head { gap: 16px; }
+  .alb-cover.lg { width: 140px; height: 140px; }
+  .alb-tracks li { grid-template-columns: 22px 40px 1fr auto; }
+  .alb-tracks li .alb-d { display: none; }
+  .alb-ops { opacity: 1; }
+  .alb-ops [data-op="play"] { display: none; }
+}
+.ad-colors { display: flex; gap: 10px; flex-wrap: wrap; }
+.ad-colors button { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; background: var(--c); cursor: pointer; box-shadow: inset 0 0 0 2px rgba(0,0,0,0.25); }
+.ad-colors button.on { border-color: #fff; transform: scale(1.1); }
+#pk-search { width: 100%; margin: 6px 0 10px; }
+.pk-list { list-style: none; padding: 0; margin: 0 0 12px; max-height: 52vh; overflow-y: auto; display: grid; gap: 4px; }
+.pk-list label { display: flex; gap: 12px; align-items: center; padding: 9px 10px; border-radius: 10px; cursor: pointer; }
+.pk-list label:hover { background: var(--panel-2); }
+.pk-list input { width: 18px; height: 18px; accent-color: var(--accent); }
+.pk-list b { display: block; font-weight: 600; }
+.pk-list small { color: var(--muted); font-size: 0.76rem; }

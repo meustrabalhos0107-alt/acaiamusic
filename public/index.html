@@ -402,6 +402,7 @@
       </header>
       <div class="lib-switch" id="lib-switch">
         <button class="on" data-l="songs">Músicas</button>
+        <button data-l="albums">📀 Álbuns <em id="alb-count"></em></button>
         <button data-l="lyrics">Minhas letras <em id="lyr-count"></em></button>
       </div>
       <div class="lib-tools hidden" id="lyr-tools">
@@ -424,6 +425,7 @@
         </select>
       </div>
       <div id="lyrics-lib" class="lyrics-lib hidden"></div>
+      <div id="albums" class="albums hidden"></div>
       <div class="lib-tools" id="lib-tools">
         <div class="filter-tabs" id="filter-tabs">
           <button class="on" data-f="all">Todas</button>
@@ -581,6 +583,7 @@
           <button id="dlg-fav" class="btn ghost">♡ Favoritar</button>
           <a id="dlg-download" class="btn ghost" download>⬇ MP3</a>
           <button id="dlg-reuse" class="btn ghost">✎ Nova versão</button>
+          <button id="dlg-album" class="btn ghost">📀 Álbum</button>
           <button id="dlg-delete" class="btn ghost danger">Excluir</button>
         </div>
         <div id="dlg-versions" class="versions hidden"></div>
@@ -856,6 +859,26 @@
       <button class="btn ghost" id="lo-copy">Copiar</button>
       <button class="btn ghost" id="lo-music">🎵 Criar música com esta letra</button>
     </div>
+  </dialog>
+
+  <!-- ============ ÁLBUM: criar / editar ============ -->
+  <dialog id="album-dialog" class="settings">
+    <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow" id="ad-eyebrow">Novo álbum</span>
+    <div class="field"><label for="ad-title">Nome do álbum</label><input id="ad-title" type="text" maxlength="100" placeholder="Ex.: Missa do Natal 2026" /></div>
+    <div class="field"><label for="ad-desc">Descrição (opcional)</label><textarea id="ad-desc" rows="3" maxlength="600" placeholder="Para que é este álbum, quando cantar, quem canta…"></textarea></div>
+    <div class="field"><label>Cor da capa</label><div class="ad-colors" id="ad-colors"></div></div>
+    <div class="pane-actions"><button class="btn primary" id="ad-save">Salvar</button></div>
+  </dialog>
+
+  <!-- ============ ESCOLHER (músicas do álbum / álbuns da música) ============ -->
+  <dialog id="pick-dialog" class="settings">
+    <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow" id="pk-eyebrow">Álbum</span>
+    <h2 id="pk-title">Escolher</h2>
+    <input id="pk-search" type="search" placeholder="Buscar…" />
+    <ul class="pk-list" id="pk-list"></ul>
+    <div class="pane-actions"><button class="btn primary" id="pk-save">Salvar</button><button class="btn ghost hidden" id="pk-new">＋ Novo álbum</button></div>
   </dialog>
 
   <!-- ============ MISSA PRONTA DO DIA ============ -->

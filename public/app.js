@@ -919,14 +919,17 @@ async function loadSongs() {
     state.songs = [];
   }
   updateCount();
+  loadAlbums();
 }
 function renderLibrary() {
-  const lyr = state.libMode === "lyrics";
+  const lyr = state.libMode === "lyrics", alb = state.libMode === "albums";
   $("#lyrics-lib").classList.toggle("hidden", !lyr);
-  $("#library").classList.toggle("hidden", lyr);
-  $("#lib-tools").classList.toggle("hidden", lyr);
+  $("#albums").classList.toggle("hidden", !alb);
+  $("#library").classList.toggle("hidden", lyr || alb);
+  $("#lib-tools").classList.toggle("hidden", lyr || alb);
   $("#lyr-tools").classList.toggle("hidden", !lyr);
   if (lyr) return renderLyricsLib();
+  if (alb) return (renderAlbums(), loadAlbums().then(() => state.libMode === "albums" && renderAlbums()));
   const box = $("#library");
   const q = state.filter.toLowerCase();
   const sorters = {
@@ -1144,6 +1147,246 @@ $$("#lib-switch button").forEach((b) =>
     renderLibrary();
   }),
 );
+
+// ---------------- Álbuns ----------------
+state.albums = [];
+state.albumOpen = null; // id do álbum aberto na biblioteca
+const ALBUM_COLORS = ["#7c3aed", "#db2777", "#ea580c", "#0891b2", "#16a34a", "#ca8a04", "#4f46e5", "#be123c"];
+async function loadAlbums() {
+  try {
+    state.albums = await api("/api/albums");
+  } catch {
+    state.albums = [];
+  }
+  $("#alb-count").textContent = state.albums.length || "";
+}
+const albumSongs = (a) => a.songIds.map((id) => state.songs.find((s) => s.id === id)).filter(Boolean);
+const albumSecs = (a) => albumSongs(a).reduce((t, s) => t + (s.duration || 0), 0);
+const fmtLong = (sec) => (sec >= 3600 ? `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min` : `${Math.max(1, Math.round(sec / 60))} min`);
+// capa: mosaico com as capas das 4 primeiras músicas (ou a cor do álbum)
+function albumCover(a, size = "") {
+  const ss = albumSongs(a).slice(0, 4);
+  const inner = ss.length >= 4
+    ? `<div class="alb-mosaic">${ss.map((s) => coverArt(s.cover ?? 1)).join("")}</div>`
+    : ss.length ? coverArt(ss[0].cover ?? 1) : "";
+  return `<div class="alb-cover ${size}" style="--alb:${a.color || ALBUM_COLORS[0]}">${inner}<span class="alb-disc">${a.setlistId ? "⛪" : "📀"}</span></div>`;
+}
+function renderAlbums() {
+  const box = $("#albums");
+  const a = state.albumOpen && state.albums.find((x) => x.id === state.albumOpen);
+  if (a) return renderAlbumDetail(box, a);
+  state.albumOpen = null;
+  const q = state.filter.toLowerCase();
+  const list = state.albums.filter((x) => !q || [x.title, x.description].join(" ").toLowerCase().includes(q));
+  box.innerHTML = `<div class="alb-grid">
+      <button class="alb-card alb-new" data-new><span class="alb-cover"><b>＋</b></span><strong>Novo álbum</strong><small>Junte músicas numa coleção</small></button>
+      ${list.map((x) => `<article class="alb-card" data-id="${x.id}">
+        ${albumCover(x)}
+        <button class="fab" data-play aria-label="Tocar o álbum">${PLAY_SVG}</button>
+        <strong>${esc(x.title)}</strong>
+        <small>${x.setlistId ? "Missa · " : ""}${albumSongs(x).length} música(s) · ${fmtLong(albumSecs(x))}</small>
+      </article>`).join("")}
+    </div>
+    ${!state.albums.length ? `<p class="muted small alb-hint">As Missas prontas viram álbuns sozinhas assim que a primeira música delas fica pronta.</p>` : ""}`;
+  $("[data-new]", box).onclick = () => editAlbum(null);
+  $$(".alb-card[data-id]", box).forEach((el) => {
+    const x = state.albums.find((y) => y.id === el.dataset.id);
+    el.onclick = (ev) => {
+      if (ev.target.closest("[data-play]")) return playAlbum(x);
+      state.albumOpen = x.id;
+      renderAlbums();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+  });
+}
+function renderAlbumDetail(box, a) {
+  const songs = albumSongs(a);
+  box.innerHTML = `<button class="link sm alb-back" data-back>← Todos os álbuns</button>
+    <header class="alb-head">
+      ${albumCover(a, "lg")}
+      <div>
+        <span class="eyebrow">${a.setlistId ? "⛪ Álbum da Missa" : "📀 Álbum"}</span>
+        <h2>${esc(a.title)}</h2>
+        ${a.description ? `<p class="muted">${esc(a.description)}</p>` : ""}
+        <p class="small muted">${songs.length} música(s) · ${fmtLong(albumSecs(a))} · atualizado em ${new Date(a.updatedAt || a.createdAt).toLocaleDateString("pt-BR")}</p>
+        <div class="dlg-actions">
+          <button class="btn primary" data-act="play">▶ Tocar</button>
+          <button class="btn ghost" data-act="shuffle">🔀 Aleatório</button>
+          <button class="btn ghost" data-act="add">＋ Músicas</button>
+          <button class="btn ghost" data-act="edit">✎ Editar</button>
+          <button class="btn ghost" data-act="share">🔗 Compartilhar</button>
+          <button class="btn ghost danger" data-act="delete">Excluir</button>
+        </div>
+      </div>
+    </header>
+    ${songs.length ? `<ol class="alb-tracks">${songs.map((s, i) => `<li data-id="${s.id}" class="${state.current?.id === s.id ? "playing" : ""}">
+        <span class="alb-n">${i + 1}</span>
+        ${coverHtml(s, "sm")}
+        <button class="alb-t" data-open><strong>${esc(s.title)}</strong><small>${esc([s.options?.mode === "catolica" && s.options.moment, s.genre].filter(Boolean).join(" · "))}</small></button>
+        <span class="alb-d">${fmt(s.duration || 0)}</span>
+        <span class="alb-ops">
+          <button data-op="play" title="Tocar daqui">▶</button>
+          <button data-op="up" title="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button data-op="down" title="Descer" ${i === songs.length - 1 ? "disabled" : ""}>↓</button>
+          <button data-op="remove" title="Tirar do álbum">✕</button>
+        </span>
+      </li>`).join("")}</ol>`
+    : `<div class="empty"><h3>Álbum vazio</h3><p>Toque em “＋ Músicas” para escolher as músicas da biblioteca.</p></div>`}`;
+  $("[data-back]", box).onclick = () => ((state.albumOpen = null), renderAlbums());
+  const acts = {
+    play: () => playAlbum(a),
+    shuffle: () => playAlbum(a, true),
+    add: () => pickSongsFor(a),
+    edit: () => editAlbum(a),
+    share: () => shareAlbum(a),
+    delete: () => deleteAlbum(a),
+  };
+  $$("[data-act]", box).forEach((b) => (b.onclick = () => acts[b.dataset.act]()));
+  $$(".alb-tracks li", box).forEach((li) => {
+    const id = li.dataset.id;
+    const song = state.songs.find((s) => s.id === id);
+    $("[data-open]", li).onclick = () => openSong(song);
+    $$("[data-op]", li).forEach((b) => (b.onclick = () => {
+      const ids = [...a.songIds];
+      const k = ids.indexOf(id);
+      if (b.dataset.op === "play") return playAlbum(a, false, albumSongs(a).findIndex((s) => s.id === id));
+      if (b.dataset.op === "remove") ids.splice(k, 1);
+      if (b.dataset.op === "up" && k > 0) [ids[k - 1], ids[k]] = [ids[k], ids[k - 1]];
+      if (b.dataset.op === "down" && k < ids.length - 1) [ids[k + 1], ids[k]] = [ids[k], ids[k + 1]];
+      saveAlbum(a, { songIds: ids });
+    }));
+  });
+}
+async function saveAlbum(a, patch) {
+  try {
+    const upd = await api(`/api/albums/${a.id}`, { method: "PUT", body: JSON.stringify({ ...a, ...patch }) });
+    state.albums = state.albums.map((x) => (x.id === upd.id ? upd : x));
+    if (state.libMode === "albums") renderAlbums();
+    return upd;
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+function playAlbum(a, shuffle = false, from = 0) {
+  let songs = albumSongs(a).filter((s) => s.url);
+  if (!songs.length) return toast("Este álbum ainda não tem músicas.");
+  if (shuffle) songs = songs.map((s) => [Math.random(), s]).sort((x, y) => x[0] - y[0]).map((x) => x[1]);
+  else songs = songs.slice(Math.max(0, from));
+  state.queue = songs.slice(1);
+  play(songs[0]);
+  toast(`▶ ${a.title}: ${songs.length} música(s)${shuffle ? " em ordem aleatória" : " em sequência"}`, false, 2500);
+}
+let adAlbum = null, adColor = ALBUM_COLORS[0];
+function editAlbum(a, songIds = []) {
+  adAlbum = a;
+  adColor = a?.color || ALBUM_COLORS[Math.floor(Math.random() * ALBUM_COLORS.length)];
+  $("#ad-eyebrow").textContent = a ? "Editar álbum" : "Novo álbum";
+  $("#ad-title").value = a?.title || "";
+  $("#ad-desc").value = a?.description || "";
+  const paint = () => ($("#ad-colors").innerHTML = ALBUM_COLORS.map((c) => `<button type="button" class="${c === adColor ? "on" : ""}" style="--c:${c}" data-c="${c}" aria-label="Cor ${c}"></button>`).join(""));
+  paint();
+  $("#ad-colors").onclick = (e) => {
+    const b = e.target.closest("[data-c]");
+    if (b) (adColor = b.dataset.c), paint();
+  };
+  $("#ad-save").onclick = async () => {
+    const title = $("#ad-title").value.trim();
+    if (!title) return $("#ad-title").focus();
+    const body = { title, description: $("#ad-desc").value.trim(), color: adColor };
+    try {
+      if (adAlbum) await saveAlbum(adAlbum, body);
+      else {
+        const created = await api("/api/albums", { method: "POST", body: JSON.stringify({ ...body, songIds }) });
+        state.albums = [created, ...state.albums];
+        $("#alb-count").textContent = state.albums.length;
+        toast(`📀 Álbum “${created.title}” criado`);
+        if (state.libMode === "albums") {
+          state.albumOpen = created.id;
+          renderAlbums();
+          if (!songIds.length) setTimeout(() => pickSongsFor(created), 50);
+        }
+      }
+      $("#album-dialog").close();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  $("#album-dialog").showModal();
+  $("#ad-title").focus();
+}
+async function deleteAlbum(a) {
+  if (!confirm(`Excluir o álbum “${a.title}”? As músicas continuam na biblioteca.`)) return;
+  try {
+    await api(`/api/albums/${a.id}`, { method: "DELETE" });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  state.albums = state.albums.filter((x) => x.id !== a.id);
+  $("#alb-count").textContent = state.albums.length || "";
+  state.albumOpen = null;
+  renderAlbums();
+  toast("Álbum excluído.");
+}
+async function shareAlbum(a) {
+  const songs = albumSongs(a);
+  const text = `📀 ${a.title}\n${a.description ? a.description + "\n" : ""}\n${songs.map((s, i) => `${i + 1}. ${s.title}${s.options?.moment ? ` (${s.options.moment})` : ""}`).join("\n")}\n\nFeito com ACAIAMUSIC`;
+  try {
+    if (navigator.share) await navigator.share({ title: a.title, text });
+    else (await navigator.clipboard.writeText(text), toast("Lista do álbum copiada. Cole no WhatsApp."));
+  } catch {}
+}
+// Diálogo de escolha com busca e caixinhas
+function openPicker({ eyebrow, title, items, onSave, onNew }) {
+  $("#pk-eyebrow").textContent = eyebrow;
+  $("#pk-title").textContent = title;
+  const checked = new Set(items.filter((i) => i.checked).map((i) => i.id));
+  const draw = () => {
+    const q = fold($("#pk-search").value);
+    $("#pk-list").innerHTML = items.filter((i) => !q || fold(i.label + " " + (i.sub || "")).includes(q)).map((i) =>
+      `<li><label><input type="checkbox" data-id="${i.id}" ${checked.has(i.id) ? "checked" : ""} /> <span><b>${esc(i.label)}</b>${i.sub ? `<small>${esc(i.sub)}</small>` : ""}</span></label></li>`).join("")
+      || `<li class="muted small">${items.length ? "Nada encontrado." : "Nenhum ainda."}</li>`;
+  };
+  $("#pk-search").value = "";
+  $("#pk-search").oninput = draw;
+  $("#pk-list").onchange = (e) => {
+    const id = e.target.dataset.id;
+    if (id) e.target.checked ? checked.add(id) : checked.delete(id);
+  };
+  draw();
+  $("#pk-new").classList.toggle("hidden", !onNew);
+  $("#pk-new").onclick = () => ($("#pick-dialog").close(), onNew());
+  $("#pk-save").onclick = async () => {
+    await onSave(checked);
+    $("#pick-dialog").close();
+  };
+  $("#pick-dialog").showModal();
+}
+function pickSongsFor(a) {
+  const songs = [...state.songs].sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  openPicker({
+    eyebrow: "📀 " + a.title,
+    title: "Músicas do álbum",
+    items: songs.map((s) => ({ id: s.id, label: s.title, sub: [s.options?.moment, s.genre, fmt(s.duration || 0)].filter(Boolean).join(" · "), checked: a.songIds.includes(s.id) })),
+    onSave: (set) => saveAlbum(a, { songIds: [...a.songIds.filter((id) => set.has(id)), ...songs.map((s) => s.id).filter((id) => set.has(id) && !a.songIds.includes(id))] }),
+  });
+}
+async function albumsForSong(song) {
+  await loadAlbums();
+  openPicker({
+    eyebrow: "🎵 " + song.title,
+    title: "Em quais álbuns?",
+    items: state.albums.map((a) => ({ id: a.id, label: a.title, sub: `${a.songIds.length} música(s)`, checked: a.songIds.includes(song.id) })),
+    onSave: async (set) => {
+      for (const a of [...state.albums]) {
+        const has = a.songIds.includes(song.id);
+        if (set.has(a.id) && !has) await saveAlbum(a, { songIds: [...a.songIds, song.id] });
+        if (!set.has(a.id) && has) await saveAlbum(a, { songIds: a.songIds.filter((x) => x !== song.id) });
+      }
+      toast("Álbuns atualizados.");
+    },
+    onNew: () => editAlbum(null, [song.id]),
+  });
+}
 
 // ---------------- Repertório da Missa ----------------
 const MASS_ORDER = [
@@ -1656,6 +1899,7 @@ function openSong(song) {
   $("#dlg-play").onclick = () => play(song);
   renderVersions(song);
   $("#dlg-fav").onclick = () => toggleFav(song);
+  $("#dlg-album").onclick = () => albumsForSong(song);
   $("#dlg-reuse").onclick = () => {
     if (song.options) applySpec(song);
     state.lastOptions = song.options || null;

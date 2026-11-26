@@ -95,13 +95,24 @@ export async function generateKaggle({ params, options, language, reference }, s
   // Na GPU grátis do Kaggle grava 2 versões para a pessoa escolher. No Modal (crédito por
   // minuto) fica 1: o planejador compõe uma versão de cada vez e a 2ª quase dobrava a espera.
   if (lm && server !== "modal") fields.batch_size = 2;
+  // Se o estúdio reiniciar no meio (ex.: foi republicado), o pedido some: envia de novo
+  const sendWithRetry = async (f) => {
+    for (let tries = 0; ; tries++) {
+      try {
+        return await submitAndWait({ fields: f, url, key, where, server, reference }, set);
+      } catch (e) {
+        if (!e.lost || tries >= 1) throw e;
+        console.log(`${where}: o estúdio reiniciou e perdeu o pedido, enviando de novo`);
+      }
+    }
+  };
   try {
-    return await submitAndWait({ fields, url, key, where, server, reference }, set);
+    return await sendWithRetry(fields);
   } catch (e) {
     if (!fields.thinking || e.canceled || /CANCELED/.test(e.message)) throw e;
     console.log(`${where}: falhou com o planejador musical, tentando sem ele:`, e.message);
     set({ status: "generating", message: `Gravando de novo no ${where} (modo simples)…` });
-    return submitAndWait({ fields: { ...fields, thinking: false }, url, key, where, server, reference }, set);
+    return sendWithRetry({ ...fields, thinking: false });
   }
 }
 
@@ -130,6 +141,7 @@ async function submitAndWait({ fields, url, key, where, server, reference }, set
   const taskId = sub.data.task_id;
 
   const t0 = Date.now();
+  let lostSince = 0; // o estúdio responde "status 0 e lista vazia" para um pedido que não conhece
   for (;;) {
     await new Promise((res) => setTimeout(res, 3000));
     if (Date.now() - t0 > 120 * 60 * 1000) throw new Error(`O estúdio do ${where} demorou demais.`);
@@ -148,6 +160,12 @@ async function submitAndWait({ fields, url, key, where, server, reference }, set
     const item = Array.isArray(q?.data) ? q.data.find((d) => d.task_id === taskId) || q.data[0] : null;
     if (!item) continue;
     if (item.status === 0) {
+      let known = true;
+      try { known = JSON.parse(item.result || "[1]").length > 0; } catch {}
+      if (!known) {
+        lostSince ||= Date.now();
+        if (Date.now() - lostSince > 45000) throw Object.assign(new Error(`O estúdio do ${where} reiniciou e perdeu o pedido.`), { lost: true });
+      } else lostSince = 0;
       const secs = Math.round((Date.now() - t0) / 1000);
       const slow = server !== "modal" && settings.kaggleCpu ? " · modo processador, mais lento" : "";
       set({ status: "generating", message: `Compondo e gravando no seu estúdio (${where}${slow})… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` });
