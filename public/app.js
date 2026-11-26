@@ -3138,18 +3138,26 @@ async function makeIllustration(song, novo = false) {
   const msg = $("#video-art-msg"), btn = $("#video-art");
   if (btn.disabled) return;
   btn.disabled = true;
-  msg.textContent = "🎨 criando a imagem do tema… (até 2 min)";
+  const t0 = Date.now();
+  const tick = () => (msg.textContent = `🎨 criando a imagem do tema… ${Math.round((Date.now() - t0) / 1000)}s (até 1 min)`);
+  tick();
+  const clock = setInterval(tick, 1000);
   try {
     const ill = await api(`/api/songs/${song.id}/illustration`, { method: "POST", body: JSON.stringify({ novo }) });
     song.illustration = ill;
     const k = state.songs.findIndex((s) => s.id === song.id);
     if (k >= 0) state.songs[k].illustration = ill;
-    msg.textContent = "pronta";
-    if (dlgSong?.id === song.id) drawVideoPreview();
+    msg.textContent = "✓ pronta";
+    if (dlgSong?.id === song.id) {
+      drawVideoPreview();
+      $("#dlg-cover").outerHTML = coverHtml(song, "lg", 'id="dlg-cover"'); // a capa da janela também muda
+    }
+    if (novo) toast("🎨 Nova capa pronta!");
   } catch (e) {
     msg.textContent = "";
-    toast(e.message, true, 7000);
+    toast(/já está sendo criada/.test(e.message) ? "A capa desta música já está sendo criada. Espere alguns segundos e veja de novo." : e.message, true, 7000);
   } finally {
+    clearInterval(clock);
     btn.disabled = false;
   }
 }
@@ -3634,6 +3642,11 @@ function stagesHtml(it) {
 }
 const Q_ICON = { done: "✅", error: "⚠️", canceled: "🚫" };
 const Q_WORD = { done: "Pronta", error: "Não deu certo", canceled: "Cancelada" };
+// "Título (refazendo com revisão de pronúncia)" -> título + etiqueta curta
+const qLabel = (l) => {
+  const m = /^(.*) \((refazendo[^)]*)\)$/.exec(String(l || ""));
+  return `<span class="qd-t">${esc(m ? m[1] : l)}</span>${m ? `<span class="qd-tag" title="${esc(m[2])}">🎯 refazendo</span>` : ""}`;
+};
 function renderQueue(q) {
   const pill = $("#queue-pill");
   pill.classList.toggle("hidden", !q.pending);
@@ -3659,7 +3672,7 @@ function renderQueue(q) {
           const tries = it.tries > 1 || it.retryAt ? ` · tentativa ${Math.min(it.tries + (it.running ? 0 : 1), it.maxTries)} de ${it.maxTries}` : "";
           return `<li class="${it.running ? "run" : ""}" data-id="${esc(it.id)}">
             <span>${it.running ? "🎙️" : k + 1 + "."}</span>
-            <div class="qd-info"><b>${esc(it.label)}</b>${it.running ? stagesHtml(it) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
+            <div class="qd-info"><b>${qLabel(it.label)}</b>${it.running ? stagesHtml(it) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
             <div class="qd-act">
               ${!it.running && (it.retryAt || k > 0) ? `<button class="btn ghost" data-q="now" title="Passar para a frente e tentar já">Agora</button>` : ""}
               <button class="btn ghost" data-q="cancel">Cancelar</button>

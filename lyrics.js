@@ -532,15 +532,60 @@ ${current}`;
 // ---------- Descrição da capa ilustrada (para o gerador de imagens) ----------
 // Imagem SIMBÓLICA do tema central (paisagens, luz, objetos, natureza): sem rostos nem pessoas
 // em destaque (geradores deformam figuras humanas, o que fica desrespeitoso em temas sacros) e sem texto.
+
+// Cores do tempo litúrgico (a capa fica na tonalidade do tempo)
+export function liturgicalPalette(season = "", moment = "") {
+  const t = `${season} ${moment}`.toLowerCase();
+  if (/exéquias|exequias|7º dia|finados/.test(t)) return { pt: "roxo e cinza suave", en: "soft violet and gentle grey tones, hopeful dawn light" };
+  if (/semana santa|paixão|ramos/.test(t)) return { pt: "vermelho", en: "deep crimson red liturgical tones" };
+  if (/pentecostes/.test(t)) return { pt: "vermelho", en: "fiery red and warm gold tones, tongues of flame light" };
+  if (/advento/.test(t)) return { pt: "roxo (violeta)", en: "deep purple and violet liturgical tones with a soft candle glow" };
+  if (/quaresma/.test(t)) return { pt: "roxo", en: "muted purple and violet liturgical tones, austere and sober" };
+  if (/natal/.test(t)) return { pt: "branco e dourado", en: "radiant white and gold liturgical tones" };
+  if (/páscoa|pascoa/.test(t)) return { pt: "branco e dourado", en: "luminous white and gold liturgical tones, sunrise glory" };
+  if (/mariana|maria|nossa senhora/.test(t)) return { pt: "branco e azul", en: "white and celestial blue Marian tones" };
+  if (/santo|mártir|martir/.test(t)) return { pt: "vermelho", en: "warm red liturgical tones" };
+  if (/tempo comum/.test(t)) return { pt: "verde", en: "fresh green liturgical tones, hopeful and peaceful" };
+  return null;
+}
+// símbolos de cada momento da Missa (para a imagem fazer sentido mesmo sem a IA de texto)
+const MOMENT_SCENE = [
+  [/comunh|pão|cordeiro/i, "a golden chalice and broken bread on an altar, soft light from above"],
+  [/oferend/i, "bread, grapes and wheat offered on a simple altar, warm light"],
+  [/santo|glória|gloria|aclama|aleluia/i, "radiant heavenly light breaking through clouds over a church, glory"],
+  [/salmo|bíblia|biblia|palavra/i, "an open Bible on a lectern lit by a beam of light"],
+  [/penitencial|kyrie|piedade/i, "a humble wooden cross on a hill under a gentle dawn sky"],
+  [/aspers/i, "clear water drops sparkling over a baptismal font, light reflections"],
+  [/acolhida|entrada/i, "open church doors with warm light pouring out onto a path"],
+  [/ação de graças|graças/i, "a field of wheat at golden hour, gratitude and peace"],
+  [/final|envio/i, "a road leading toward a bright horizon at sunrise, mission"],
+  [/maria|mariano|ave/i, "white lilies and a soft blue sky with a gentle star"],
+  [/aniversário|aniversario/i, "a candle and spring flowers with warm blessed light"],
+];
+function fallbackScene({ title, sections = [], mode, moment }) {
+  const words = `${title} ${(sections[0]?.lines || []).join(" ")}`.toLowerCase();
+  const hit = MOMENT_SCENE.find(([re]) => re.test(moment || "") || re.test(words));
+  const base = hit ? hit[1] : mode === "catolica" ? "a peaceful sacred landscape with a small chapel and rays of light" : "a beautiful symbolic landscape that evokes the feeling of the song";
+  return `${base}, symbolic illustration of "${title}", painterly, cinematic light, no people`;
+}
 export async function illustrationPrompt({ title, sections = [], mode, moment, season, genre, moods = [] }) {
+  const pal = mode === "catolica" ? liturgicalPalette(season, moment) : null;
   const chorus = sections.find((s) => /refr|chorus|resposta/i.test(s.name)) || sections[0];
   const lyric = sections.slice(0, 3).map((s) => s.lines.join(" ")).join(" / ").slice(0, 900);
   const system = `Você é diretor de arte. Escreva, EM INGLÊS, a descrição de UMA imagem ilustrativa (capa de música) que represente o tema central da letra.
-Regras: imagem simbólica e bonita (paisagem, luz, natureza, objetos e símbolos do tema); NADA de rostos ou pessoas em primeiro plano (no máximo silhuetas pequenas e distantes);${mode === "catolica" ? " símbolos cristãos/católicos respeitosos e coerentes com o tema e o tempo litúrgico (cores litúrgicas, luz, cruz, cálice, pomba, velas, Bíblia, vitrais, paisagens da Terra Santa);" : ""} sem texto, letras ou palavras na imagem; descreva cena, iluminação, paleta de cores e estilo artístico (ex.: oil painting, watercolor, cinematic light). Máximo de 60 palavras.
+Regras: imagem simbólica e bonita (paisagem, luz, natureza, objetos e símbolos do tema); NADA de rostos ou pessoas em primeiro plano (no máximo silhuetas pequenas e distantes);${mode === "catolica" ? " símbolos cristãos/católicos respeitosos e coerentes com o tema e o momento da Missa;" : ""}${pal ? ` a paleta de cores DEVE seguir a cor litúrgica do tempo: ${pal.pt};` : ""} sem texto, letras ou palavras na imagem; descreva cena, iluminação, paleta de cores e estilo artístico (ex.: oil painting, watercolor, cinematic light). Máximo de 60 palavras.
 Responda SOMENTE com JSON: {"prompt":"..."}`;
-  const user = `Título: ${title}\n${mode === "catolica" ? `Momento litúrgico: ${moment || "—"} · Tempo: ${season || "—"}\n` : ""}Estilo musical: ${genre || "—"} · Clima: ${moods.join(", ") || "—"}\nRefrão: ${(chorus?.lines || []).join(" ")}\nLetra: ${lyric}`;
-  const raw = await callLLM(system, user);
-  const p = String(raw?.prompt || "").replace(/\s+/g, " ").trim().slice(0, 600);
-  if (p.length < 20) throw new LyricsError("Não consegui descrever a imagem agora.");
-  return `${p}, high quality illustration, no text`;
+  const user = `Título: ${title}
+${mode === "catolica" ? `Momento litúrgico: ${moment || "—"} · Tempo: ${season || "—"}
+` : ""}Estilo musical: ${genre || "—"} · Clima: ${moods.join(", ") || "—"}
+Refrão: ${(chorus?.lines || []).join(" ")}
+Letra: ${lyric}`;
+  let p = "";
+  try {
+    // a IA de texto às vezes está lotada: no máximo 20 s; depois, uma cena montada pelo momento e pelo tema
+    const raw = await Promise.race([callLLM(system, user), new Promise((_, rej) => setTimeout(() => rej(new Error("demorou")), 20000))]);
+    p = String(raw?.prompt || "").replace(/s+/g, " ").trim().slice(0, 600);
+  } catch {}
+  if (p.length < 20) p = fallbackScene({ title, sections, mode, moment });
+  return `${p}${pal ? `, ${pal.en}` : ""}, high quality illustration, no text`;
 }

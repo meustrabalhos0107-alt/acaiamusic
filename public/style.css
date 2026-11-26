@@ -1161,3 +1161,16 @@ dialog { max-width: calc(100vw - 16px); }
 .alb-mosaic img.art { position: relative; }
 .cover.pic { background: #120d1b; }
 .cover.pic::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); pointer-events: none; }
+
+/* Fila: a grade respeita a largura da janela (nomes longos são cortados com "…", botões sempre visíveis) */
+.qd-list { grid-template-columns: minmax(0, 1fr); }
+.qd-list > li { min-width: 0; }
+.qd-tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; vertical-align: middle; background: color-mix(in srgb, var(--accent) 18%, transparent); color: #e9d5ff; white-space: nowrap; }
+@media (max-width: 560px) {
+  .qd-list > li { flex-wrap: wrap; }
+  .qd-list > li > .qd-info { flex: 1 1 calc(100% - 40px); }
+  .qd-list > li > .qd-act { flex: 1 1 100%; justify-content: flex-end; }
+}
+.qd-info b { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.qd-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.qd-tag { flex: none; margin-left: 0; }
