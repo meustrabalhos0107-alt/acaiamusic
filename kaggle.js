@@ -92,6 +92,9 @@ export async function generateKaggle({ params, options, language, reference }, s
   Object.assign(fields, lm
     ? { thinking: true, use_cot_caption: false, use_cot_language: false, lm_temperature: 0.85, lm_cfg_scale: 2.5 }
     : { thinking: false, use_cot_caption: false, use_cot_language: false });
+  // Com GPU, grava 2 versões de uma vez (quase o mesmo tempo): a pessoa escolhe a melhor.
+  // No modo processador seria o dobro do tempo, então fica 1.
+  if (lm) fields.batch_size = 2;
   try {
     return await submitAndWait({ fields, url, key, where, server, reference }, set);
   } catch (e) {
@@ -154,13 +157,23 @@ async function submitAndWait({ fields, url, key, where, server, reference }, set
     if (item.status === 1) {
       let list = item.result;
       if (typeof list === "string") list = JSON.parse(list);
-      const file = (Array.isArray(list) ? list : [list]).find((x) => x?.file)?.file;
-      if (!file) throw new Error(`O estúdio do ${where} não devolveu o arquivo.`);
-      set({ status: "saving", message: `Baixando a música do ${where}…` });
-      const audioUrl = /^https?:/i.test(file) ? file : url + (file.startsWith("/") ? "" : "/") + file;
-      const dl = await fetch(audioUrl, { headers: authHeaders(key), signal: AbortSignal.timeout(300000) });
-      if (!dl.ok) throw new Error(`Falha ao baixar a música (${dl.status}).`);
-      return Buffer.from(await dl.arrayBuffer());
+      const files = (Array.isArray(list) ? list : [list]).map((x) => x?.file).filter(Boolean).slice(0, 2);
+      if (!files.length) throw new Error(`O estúdio do ${where} não devolveu o arquivo.`);
+      set({ status: "saving", message: `Baixando ${files.length > 1 ? "as 2 versões" : "a música"} do ${where}…` });
+      // devolve uma lista: [versão principal, versão alternativa?]; só a 1ª é obrigatória
+      const out = [];
+      for (const [i, file] of files.entries()) {
+        const audioUrl = /^https?:/i.test(file) ? file : url + (file.startsWith("/") ? "" : "/") + file;
+        try {
+          const dl = await fetch(audioUrl, { headers: authHeaders(key), signal: AbortSignal.timeout(300000) });
+          if (!dl.ok) throw new Error(`Falha ao baixar a música (${dl.status}).`);
+          out.push(Buffer.from(await dl.arrayBuffer()));
+        } catch (e) {
+          if (i === 0) throw e;
+          console.log(`${where}: 2ª versão não baixou:`, e.message);
+        }
+      }
+      return out;
     }
   }
 }

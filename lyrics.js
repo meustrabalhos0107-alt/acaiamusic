@@ -134,13 +134,13 @@ Princípios obrigatórios:
 9. Imagens concretas e coerentes (luz, pão, caminho, pastor), sem misturar metáforas que se contradizem.
 Responda SOMENTE com JSON válido, sem texto fora dele:
 {"title":"título curto","styles":["4 a 6 tags EM INGLÊS do som sacro: estilo, instrumentos, clima"],"references":["referências bíblicas usadas, ex.: Jo 6,35"],"notes":"1 frase sobre como cantar (quem canta o quê)","sections":[{"name":"Refrão|Estrofe 1|…","lines":["verso","verso"]}]}
-Cada verso com no máximo 70 caracteres.`;
+Cada verso CURTO: de 6 a 10 sílabas poéticas (no máximo uns 45 caracteres), para caber no tempo e ser cantado com clareza. Respeite o tamanho pedido: letra demais faz a música pular versos.`;
 
 const SYSTEM_FREE = `Você é um compositor profissional. Escreva músicas ORIGINAIS, cantáveis, com rima, métrica consistente e um refrão marcante e repetível.
 Nunca copie letras existentes nem cite artistas reais.
 Responda SOMENTE com JSON válido, sem texto fora dele:
 {"title":"título curto e criativo","styles":["5 a 8 tags EM INGLÊS: gênero, instrumentos, clima"],"references":[],"notes":"","sections":[{"name":"Intro|Verso 1|Pré-refrão|Refrão|Verso 2|Ponte|Final","lines":["verso"]}]}
-Regras: a letra conta UMA história ou ideia central, com começo, meio e fim; o refrão resume essa ideia; cada verso é uma frase completa e ligada ao anterior; linguagem do dia a dia, ordem direta, gramática correta; imagens concretas; nada de versos soltos só para rimar (se a rima forçar a frase, troque a rima); revise para que faça sentido e soe natural; respeite o tamanho pedido; versos com no máximo 90 caracteres; seções instrumentais têm "lines": [].`;
+Regras: a letra conta UMA história ou ideia central, com começo, meio e fim; o refrão resume essa ideia; cada verso é uma frase completa e ligada ao anterior; linguagem do dia a dia, ordem direta, gramática correta; imagens concretas; nada de versos soltos só para rimar (se a rima forçar a frase, troque a rima); revise para que faça sentido e soe natural; respeite o tamanho pedido; versos CURTOS de 6 a 10 sílabas (no máximo uns 50 caracteres), senão não cabem no tempo da música e versos são pulados; seções instrumentais têm "lines": [].`;
 
 // ---------- Utilidades ----------
 const strList = (v, n, len = 60) =>
@@ -352,14 +352,18 @@ async function callLLM(system, user) {
   throw new LyricsError("Não consegui escrever a letra agora. Tente de novo em instantes.");
 }
 
+// Quanto cabe cantar no tempo pedido (cantar com calma: ~2,5 sílabas por segundo, com introdução,
+// respiros e final instrumental). Letra demais faz o modelo de música atropelar ou pular versos.
 function sizeGuide(duration) {
-  return duration <= 45
-    ? "curta: refrão + 1 estrofe"
+  return duration <= 50
+    ? "curta: só o refrão (4 versos) e 1 estrofe de 4 versos; o refrão aparece 2 vezes"
     : duration <= 100
-      ? "média: refrão + 2 estrofes"
-      : duration <= 200
-        ? "completa: refrão + 3 estrofes (refrão repetido entre elas)"
-        : "longa: refrão + 4 ou 5 estrofes, refrão repetido entre elas e no final";
+      ? "média: refrão de 4 versos + 1 estrofe de 4 versos, refrão repetido no final (cerca de 16 versos cantados no total)"
+      : duration <= 160
+        ? "padrão: refrão de 4 versos + 2 estrofes de 4 versos, refrão depois de cada estrofe (cerca de 20 versos cantados no total, não mais)"
+        : duration <= 230
+          ? "completa: refrão + 3 estrofes de 4 versos, refrão entre elas (cerca de 28 versos no total)"
+          : "longa: refrão + 4 estrofes de 4 versos, refrão entre elas e no final";
 }
 
 export async function writeLyrics({ idea, language, duration, options: o }) {

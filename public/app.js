@@ -1598,6 +1598,37 @@ const safeName = (s) => (s || "musica").replace(/[\\/:*?"<>|]+/g, "").trim() || 
 // MÚSICA (diálogo com abas)
 // =========================================================
 let dlgSong = null;
+// Duas versões gravadas juntas (estúdio com GPU): ouvir as duas e escolher a principal
+function renderVersions(song) {
+  const box = $("#dlg-versions");
+  box.classList.toggle("hidden", !song.alt);
+  if (!song.alt) return (box.innerHTML = "");
+  const cur = song.take || "A", other = cur === "A" ? "B" : "A";
+  box.innerHTML = `<span class="v-label">🎚️ Gravamos 2 versões. Ouça e fique com a melhor:</span>
+    <div class="v-row">
+      <button class="btn ghost sm v-on" data-v="main">▶ Versão ${cur} <small>principal</small></button>
+      <button class="btn ghost sm" data-v="alt">▶ Versão ${other}</button>
+      <button class="btn primary sm" data-v="swap">Usar a versão ${other}</button>
+    </div>`;
+  box.querySelector('[data-v="main"]').onclick = () => play(song);
+  box.querySelector('[data-v="alt"]').onclick = () => play({ ...song, url: song.alt.url, title: `${song.title} · versão ${other}` });
+  box.querySelector('[data-v="swap"]').onclick = async (e) => {
+    e.target.disabled = true;
+    try {
+      const j = await api(`/api/songs/${song.id}/swap-version`, { method: "POST" });
+      for (const k of ["stems", "timing"]) delete song[k];
+      Object.assign(song, j.song);
+      const i = state.songs.findIndex((s) => s.id === song.id);
+      if (i >= 0) state.songs[i] = song;
+      toast(`Agora a versão ${song.take} é a principal`, false, 2200);
+      openSong(song);
+      play(song);
+    } catch (err) {
+      toast(err.message, true);
+      e.target.disabled = false;
+    }
+  };
+}
 function openSong(song) {
   dlgSong = song;
   const dlg = $("#song-dialog");
@@ -1613,6 +1644,7 @@ function openSong(song) {
   $("#dlg-download").href = song.url;
   $("#dlg-download").download = `${safeName(song.title)}.mp3`;
   $("#dlg-play").onclick = () => play(song);
+  renderVersions(song);
   $("#dlg-fav").onclick = () => toggleFav(song);
   $("#dlg-reuse").onclick = () => {
     if (song.options) applySpec(song);
@@ -2852,6 +2884,21 @@ $("#sh-video").onclick = shareVideo;
 // PLAYER (transporte)
 // =========================================================
 const audio = $("#audio");
+let audioRetries = 0;
+audio.addEventListener("loadeddata", () => (audioRetries = 0));
+audio.addEventListener("error", () => {
+  if (!state.current || !audio.src) return;
+  if (audioRetries >= 3) return toast("Não consegui tocar esta música agora. Verifique a internet e toque de novo.", true);
+  audioRetries++;
+  toast(`O áudio não carregou, tentando de novo (${audioRetries}/3)…`, false, 2500);
+  const at = audio.currentTime || 0;
+  setTimeout(() => {
+    const base = audio.src.replace(/([?&])retry=d+&?/, "$1").replace(/[?&]$/, "");
+    audio.src = base + (base.includes("?") ? "&" : "?") + "retry=" + Date.now();
+    audio.addEventListener("loadedmetadata", () => { try { audio.currentTime = at; } catch {} }, { once: true });
+    audio.play().catch(() => {});
+  }, 2500 * audioRetries);
+});
 $("#btn-play").innerHTML = PLAY_SVG;
 function play(song) {
   stopMixer(false);

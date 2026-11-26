@@ -322,6 +322,8 @@ async function generateOn15Spaces({ params, options, language, reference }, set)
 
 async function runJob(id, { plan, duration, language, meta, options, reference, spec = {} }) {
   const startedAt = Date.now();
+  // Pedidos antigos da fila guardaram 40 BPM por engano (andamento "auto" virava 40): descarta
+  if (options.bpm === 40 && (options.tempo || "auto") === "auto") options = { ...options, bpm: 0 };
   let engine = "Hugging Face (gratuito)";
   const job = jobs.get(id);
   // guarda quando cada etapa começou (para mostrar "Ligando o estúdio · 3 min", etc.)
@@ -334,7 +336,14 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
   job.startedAt = startedAt;
   try {
     set({ status: "connecting", message: "Conectando ao estúdio de IA…" });
-    const seconds = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, duration));
+    // A letra precisa caber no tempo: cantando com calma são ~2,5 sílabas por segundo, mais
+    // ~20 s de introdução, respiros e final. Se não couber, a música fica mais longa (até o
+    // limite) em vez de o modelo atropelar ou pular versos.
+    const sung = options.voice === "Instrumental" ? "" : plan.sections.flatMap((s) => s.lines).join(" ");
+    const syllables = (sung.toLowerCase().match(/[aeiouáéíóúâêôãõàü]+/g) || []).length;
+    const needed = Math.ceil(syllables / 2.5 + 20);
+    const seconds = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, Math.max(duration, needed)));
+    if (needed > duration) console.log(`Letra longa (${syllables} sílabas): duração ${duration}s → ${seconds}s para caber tudo`);
     const params = {
       prompt: buildTags(options, plan.styles),
       lyrics: options.voice === "Instrumental" ? "[instrumental]" : toAceLyrics(plan.sections),
@@ -424,9 +433,22 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     set({ status: "saving", message: "Masterizando (volume e brilho de streaming)…" });
     // ffmpeg num processo à parte: converter/masterizar aqui dentro travava o servidor grátis
     // (o Render achava que o app tinha morrido e o reiniciava sem parar)
-    const { mp3, seconds: realSeconds, mastered } = await masterOrPlain(raw);
+    // o estúdio com GPU devolve 2 versões: a 1ª é a principal, a 2ª fica para a pessoa comparar
+    const [mainRaw, altRaw] = Array.isArray(raw) ? raw : [raw];
+    const { mp3, seconds: realSeconds, mastered } = await masterOrPlain(mainRaw);
     if (job.canceled) throw new Error("CANCELED");
     await fs.writeFile(path.join(SONGS_DIR, `${id}.mp3`), mp3);
+    let alt = null;
+    if (altRaw) {
+      set({ status: "saving", message: "Masterizando a 2ª versão…" });
+      try {
+        const a = await masterOrPlain(altRaw);
+        await fs.writeFile(path.join(SONGS_DIR, `${id}-v2.mp3`), a.mp3);
+        alt = { url: `/audio/${id}-v2.mp3`, duration: Math.round(a.seconds || 0) };
+      } catch (e) {
+        console.log("2ª versão não foi salva:", e.message);
+      }
+    }
 
     const song = {
       id,
@@ -458,6 +480,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
         generationSeconds: Math.round((Date.now() - startedAt) / 1000),
       },
       url: `/audio/${id}.mp3`,
+      ...(alt ? { alt } : {}),
     };
     await updateSongs((songs) => [song, ...songs]);
     set({ status: "done", message: "Pronta!", song });
@@ -536,6 +559,7 @@ async function pump() {
         // se a música chegou a ficar pronta, é apagada quando o trabalho antigo terminar
         run.then(async () => {
           await fs.rm(path.join(SONGS_DIR, `${t.id}.mp3`), { force: true });
+          await fs.rm(path.join(SONGS_DIR, `${t.id}-v2.mp3`), { force: true });
           await updateSongs((songs) => songs.filter((x) => x.id !== t.id));
         });
       } else if (j?.status === "done") {
@@ -945,9 +969,46 @@ app.delete("/api/songs/:id", async (req, res) => {
   const song = songs.find((s) => s.id === req.params.id);
   if (!song) return res.status(404).json({ error: "Música não encontrada." });
   await fs.rm(path.join(SONGS_DIR, `${song.id}.mp3`), { force: true });
+  await fs.rm(path.join(SONGS_DIR, `${song.id}-v2.mp3`), { force: true });
   await fs.rm(studio.mediaDir(song.id), { recursive: true, force: true });
   await updateSongs((list) => list.filter((s) => s.id !== song.id));
   res.json({ ok: true });
+});
+
+// Troca a versão principal pela alternativa (as duas vieram juntas do estúdio com GPU).
+// Os arquivos trocam de lugar no disco, porque faixas, vídeo e karaokê leem sempre <id>.mp3;
+// o que foi feito a partir da versão antiga (faixas separadas, tempo do karaokê) é refeito depois.
+app.post("/api/songs/:id/swap-version", async (req, res) => {
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song?.alt) return res.status(404).json({ error: "Esta música não tem outra versão." });
+  const main = path.join(SONGS_DIR, `${song.id}.mp3`), alt = path.join(SONGS_DIR, `${song.id}-v2.mp3`), tmp = main + ".swap";
+  try {
+    await fs.rename(main, tmp);
+    await fs.rename(alt, main);
+    await fs.rename(tmp, alt);
+  } catch (e) {
+    return res.status(500).json({ error: "Não consegui trocar as versões: " + e.message });
+  }
+  for (const f of ["instrumental", "vocals", "drums", "bass", "other"]) await fs.rm(path.join(studio.mediaDir(song.id), `${f}.mp3`), { force: true });
+  let updated = null;
+  await updateSongs((songs) =>
+    songs.map((s) => {
+      if (s.id !== song.id) return s;
+      const rev = (s.rev || 0) + 1; // muda o endereço para o navegador não tocar o áudio antigo do cache
+      const take = s.take === "B" ? "A" : "B";
+      const { stems, timing, ...rest } = s;
+      updated = {
+        ...rest,
+        rev,
+        take,
+        duration: s.alt.duration || s.duration,
+        url: `/audio/${s.id}.mp3?v=${rev}`,
+        alt: { url: `/audio/${s.id}-v2.mp3?v=${rev}`, duration: s.duration },
+      };
+      return updated;
+    }),
+  );
+  res.json({ song: updated });
 });
 
 app.get("/api/status", async (_req, res) => {
