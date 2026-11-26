@@ -54,3 +54,41 @@ def estudio():
         HF_HOME="/models/hf",
     )
     subprocess.Popen(["uv", "run", "acestep-api"], cwd="/app", env=env)
+
+
+# ---------- Separador de faixas (Demucs) na GPU: ~20 s por música ----------
+# O separador público e gratuito é lento e vive lotado; aqui ele liga só para a sua música.
+# Endereço: o mesmo do estúdio, trocando "-estudio.modal.run" por "-separar.modal.run".
+sep_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("ffmpeg")
+    .pip_install("torch==2.5.1", "torchaudio==2.5.1", "demucs==4.0.1", "lameenc", "soundfile", "fastapi[standard]")
+    .run_commands("python -c \"from demucs.pretrained import get_model; get_model('htdemucs')\"")
+)
+
+
+@app.function(
+    image=sep_image,
+    gpu="T4",
+    secrets=[modal.Secret.from_name("acaiamusic")],
+    scaledown_window=60,  # desliga 1 min depois da última separação
+    max_containers=1,
+    timeout=15 * 60,
+)
+@modal.fastapi_endpoint(method="POST")
+def separar(item: dict):
+    import base64
+    import pathlib
+    import tempfile
+
+    if item.get("key") != os.environ["ACESTEP_API_KEY"]:
+        return {"error": "Chave incorreta."}
+    with tempfile.TemporaryDirectory() as d:
+        src = pathlib.Path(d, "musica.mp3")
+        src.write_bytes(base64.b64decode(item["audio"]))
+        subprocess.run(
+            ["python", "-m", "demucs", "-n", "htdemucs", "--mp3", "--mp3-bitrate", "192", "-o", d, str(src)],
+            check=True,
+        )
+        out = pathlib.Path(d, "htdemucs", "musica")
+        return {n: base64.b64encode((out / f"{n}.mp3").read_bytes()).decode() for n in ["vocals", "bass", "drums", "other"]}

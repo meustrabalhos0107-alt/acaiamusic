@@ -91,6 +91,24 @@ function runFfmpeg(args, timeoutMs = 180000) {
   });
 }
 
+// Faixas separadas (voz, bateria, baixo, outros: WAV ou MP3) -> MP3 de cada uma + playback
+// (bateria + baixo + outros). Tudo no ffmpeg, fora do processo do app: em JavaScript isso
+// travava o servidor grátis por minutos.
+export async function stemsToMp3(files, dir) {
+  const id = randomUUID();
+  const names = ["vocals", "bass", "drums", "other"];
+  const srcs = names.map((n) => path.join(os.tmpdir(), `acaia-stem-${id}-${n}`));
+  await Promise.all(files.slice(0, 4).map((b, i) => fsp.writeFile(srcs[i], b)));
+  try {
+    const enc = ["-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "192k"];
+    await runFfmpeg(["-i", srcs[1], "-i", srcs[2], "-i", srcs[3], "-filter_complex", "amix=inputs=3:normalize=0:duration=longest,alimiter=limit=0.95", ...enc, path.join(dir, "instrumental.mp3")], 300000);
+    for (const [i, n] of names.entries()) await runFfmpeg(["-i", srcs[i], ...enc, path.join(dir, `${n}.mp3`)], 300000);
+  } finally {
+    await Promise.all(srcs.map((s) => fsp.rm(s, { force: true })));
+  }
+  return ["instrumental", ...names];
+}
+
 const TONE = "highpass=f=28,equalizer=f=280:t=q:w=1.2:g=-1.5,treble=g=1.5:f=9500,acompressor=threshold=-20dB:ratio=1.8:attack=25:release=280:makeup=1.5";
 
 export async function master(buf) {

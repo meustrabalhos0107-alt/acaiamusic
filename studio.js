@@ -6,10 +6,31 @@ import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
-import { encodeMp3, mixTracks, parseWav } from "./audio.js";
+import { stemsToMp3 } from "./audio.js";
+import { getSettings } from "./kaggle.js";
 
 const STEMS_HOST = process.env.STEMS_HOST || "nakas-demucs-playground.hf.space";
 const STEM_NAMES = ["vocals", "bass", "drums", "other"];
+
+// ---------- Separação rápida: Demucs na GPU do seu estúdio no Modal (~20 s) ----------
+export function modalSeparatorUrl() {
+  const s = getSettings();
+  if (s.modalSepUrl) return s.modalSepUrl;
+  const re = /-estudio\.modal\.run\/?$/;
+  return re.test(s.modalUrl || "") ? s.modalUrl.replace(re, "-separar.modal.run") : "";
+}
+async function demucsModal(mp3Buffer, onStatus) {
+  onStatus("Separando voz e instrumentos na GPU do seu estúdio (Modal)…");
+  const r = await fetch(modalSeparatorUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: getSettings().modalKey, audio: mp3Buffer.toString("base64") }),
+    signal: AbortSignal.timeout(15 * 60 * 1000),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error || !j.vocals) throw new Error(j.error || `o separador do Modal respondeu ${r.status}`);
+  return ["vocals", "bass", "drums", "other"].map((n) => Buffer.from(j[n], "base64"));
+}
 
 // ---------- Separação: Space Gradio 3 (protocolo WebSocket legado) ----------
 function demucs(mp3Buffer, token, onStatus) {
@@ -122,22 +143,21 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
       try {
         set({ status: "generating", message: "Enviando para o separador de IA…" });
         const mp3 = await fs.readFile(path.join(SONGS_DIR, `${song.id}.mp3`));
-        const wavs = await demucs(mp3, HF_TOKEN, (message) => set({ status: "generating", message }));
+        const status = (message) => set({ status: "generating", message });
+        let wavs = null;
+        if (modalSeparatorUrl()) {
+          try {
+            wavs = await demucsModal(mp3, status);
+          } catch (e) {
+            console.log("Separador do Modal falhou, usando o gratuito:", e.message);
+          }
+        }
+        wavs ||= await demucs(mp3, HF_TOKEN, status);
         set({ status: "saving", message: "Mixando o playback e salvando em MP3…" });
-        const pcm = wavs.map(parseWav);
-        const [vocals, bass, drums, other] = pcm;
         const dir = MEDIA(song.id);
         mkdirSync(dir, { recursive: true });
         const out = {};
-        const write = async (name, track) => {
-          await fs.writeFile(path.join(dir, `${name}.mp3`), encodeMp3(track, 192));
-          out[name] = `/audio/media/${song.id}/${name}.mp3`;
-        };
-        await write("instrumental", mixTracks([bass, drums, other]));
-        await write("vocals", vocals);
-        await write("drums", drums);
-        await write("bass", bass);
-        await write("other", other);
+        for (const name of await stemsToMp3(wavs, dir)) out[name] = `/audio/media/${song.id}/${name}.mp3`;
         await saveField(song.id, { stems: out });
         set({ status: "done", message: "Faixas separadas!", song: { ...song, stems: out } });
       } catch (e) {
