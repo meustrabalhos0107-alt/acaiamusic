@@ -23,17 +23,16 @@ image = (
     .run_commands(
         "git clone --depth 1 https://github.com/ACE-Step/ACE-Step-1.5.git /app",
         "cd /app && UV_LINK_MODE=copy uv sync --no-dev",
+        # Os modelos (~10 GB) ficam DENTRO da imagem: a máquina liga com tudo pronto, sem baixar
+        # nada (no volume eles se perdiam quando o estúdio era republicado e baixavam de novo).
+        "cd /app && uv run python -c \"from huggingface_hub import snapshot_download; snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/ckpt')\"",
     )
 )
-
-# Os modelos ficam guardados aqui: baixam só na primeira vez
-models = modal.Volume.from_name("acaiamusic-modelos", create_if_missing=True)
 
 
 @app.function(
     image=image,
     gpu="L4",  # GPU nova (bfloat16): na T4 o ACE-Step 1.5 gera NaN (som vazio) em músicas longas
-    volumes={"/models": models},
     secrets=[modal.Secret.from_name("acaiamusic")],
     scaledown_window=300,  # desliga sozinho 5 min depois da última música (a próxima não recarrega os modelos)
     max_containers=1,  # nunca liga mais de uma GPU
@@ -50,8 +49,7 @@ def estudio():
         ACESTEP_INIT_LLM="true",  # planejador musical (5Hz LM): som mais humano e natural
         ACESTEP_LM_MODEL_PATH="acestep-5Hz-lm-1.7B",
         ACESTEP_LM_BACKEND="pt",
-        ACESTEP_CHECKPOINTS_DIR="/models",
-        HF_HOME="/models/hf",
+        ACESTEP_CHECKPOINTS_DIR="/ckpt",
         ACESTEP_GENERATION_TIMEOUT="3600",
         ACESTEP_NO_INIT="false",  # carrega os modelos ao ligar (o pré-aquecimento já deixa tudo pronto)
     )
