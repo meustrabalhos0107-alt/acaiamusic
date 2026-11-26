@@ -372,11 +372,15 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
   const job = jobs.get(id);
   // guarda quando cada etapa começou (para mostrar "Ligando o estúdio · 3 min", etc.)
   const stamp = (patch) => (patch.status && patch.status !== job.status ? { ...patch, stageAt: Date.now() } : patch);
+  // cada tentativa tem um número: se o vigia da fila desistir desta e começar outra,
+  // esta para no próximo passo e não salva nada por cima da nova
+  const attempt = (job.attempt = (job.attempt || 0) + 1);
   const set = (patch) => {
     if (job.canceled) throw new Error("CANCELED");
+    if (job.attempt !== attempt) throw new Error("SUPERSEDED");
     Object.assign(job, stamp(patch), { updatedAt: Date.now() });
   };
-  const softSet = (patch) => !job.canceled && Object.assign(job, stamp(patch), { updatedAt: Date.now() }); // não interrompe a ligação do estúdio
+  const softSet = (patch) => !job.canceled && job.attempt === attempt && Object.assign(job, stamp(patch), { updatedAt: Date.now() }); // não interrompe a ligação do estúdio
   job.startedAt = startedAt;
   try {
     set({ status: "connecting", message: "Conectando ao estúdio de IA…" });
@@ -541,6 +545,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     set({ status: "done", message: "Pronta!", song });
   } catch (e) {
     if (job.canceled) return setCanceled(job);
+    if (job.attempt !== attempt) return console.log("Tentativa antiga encerrada:", e?.message || e);
     console.error("Erro música:", e?.message || e);
     if (/connect|fetch failed|ECONN/i.test(String(e?.message))) aceClient = null; // reconecta na próxima
     set({ status: "error", error: friendlyAceError(String(e?.message || e)) });
@@ -602,7 +607,27 @@ async function pump() {
       saveQueue();
       const run = chain.then(() => runJob(t.id, t.input));
       chain = run.catch(() => {});
-      await Promise.race([run, new Promise((r) => (cancelCurrent = r))]);
+      // Vigia: se a tentativa ficar 10 min sem nenhum sinal, ou passar do tempo máximo, desiste
+      // dela (a música volta para a fila e tenta de novo) para nada ficar preso para sempre.
+      let watch;
+      const stuck = new Promise((resolve) => {
+        const began = Date.now();
+        const maxMin = getSettings().kaggleCpu ? 150 : 60; // sem GPU no Kaggle a música pode cair no modo processador (lento)
+        watch = setInterval(() => {
+          const jj = jobs.get(t.id);
+          if (!jj || jj.canceled || ["done", "error"].includes(jj.status)) return;
+          const quiet = Date.now() - Math.max(jj.updatedAt || 0, began) > 10 * 60000;
+          const tooLong = Date.now() - began > maxMin * 60000;
+          if (!quiet && !tooLong) return;
+          console.log(`Fila: "${t.label || t.input?.plan?.title}" ${quiet ? "parou de responder" : "passou do tempo"}; tentando de novo`);
+          jj.attempt = (jj.attempt || 0) + 1000; // a tentativa presa para no próximo passo
+          Object.assign(jj, { status: "error", error: quiet ? "O estúdio parou de responder." : "A gravação demorou demais.", updatedAt: Date.now() });
+          resolve("stuck");
+        }, 20000);
+      });
+      const outcome = await Promise.race([run, stuck, new Promise((r) => (cancelCurrent = r))]);
+      clearInterval(watch);
+      if (outcome === "stuck") chain = Promise.resolve(); // a próxima não espera a presa terminar
       cancelCurrent = null;
       currentTask = null;
       const j = jobs.get(t.id);

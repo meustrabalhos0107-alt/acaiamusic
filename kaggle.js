@@ -145,6 +145,8 @@ async function submitAndWait({ fields, url, key, where, server, reference }, set
   for (;;) {
     await new Promise((res) => setTimeout(res, 3000));
     if (Date.now() - t0 > 120 * 60 * 1000) throw new Error(`O estúdio do ${where} demorou demais.`);
+    // Na GPU do Modal uma música leva ~1-2 min: passou de 15, o pedido se perdeu; envia de novo
+    if (server === "modal" && Date.now() - t0 > 15 * 60 * 1000) throw Object.assign(new Error("O estúdio do Modal não terminou a tempo."), { lost: true });
     let q;
     try {
       const qr = await fetch(`${url}/query_result`, {
