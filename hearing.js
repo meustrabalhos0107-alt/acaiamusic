@@ -69,7 +69,13 @@ export function chordSheetFromAudio(order, heard) {
     else if (next == null) times[i] = times[prev] + (i - prev) * 0.4;
     else times[i] = times[prev] + ((times[next] - times[prev]) * (i - prev)) / (next - prev);
   }
-  const segs = heard.chords.filter((c) => c[2] !== "N");
+  // nome das notas conforme o tom: em tons com bemóis, Db em vez de C#, etc.
+  const FLAT_KEYS = /^(F|Bb|Eb|Ab|Db|Gb|Dm|Gm|Cm|Fm|Bbm|Ebm)$/;
+  const toFlat = { "C#": "Db", "D#": "Eb", "F#": "Gb", "G#": "Ab", "A#": "Bb" };
+  const toSharp = { Db: "C#", Eb: "D#", Gb: "F#", Ab: "G#" };
+  const flat = FLAT_KEYS.test(heard.key || "");
+  const spell = (c) => c.replace(/^([A-G][#b]?)/, (r) => (flat ? toFlat[r] : toSharp[r]) || r);
+  const segs = heard.chords.filter((c) => c[2] !== "N").map((c) => [c[0], c[1], spell(c[2])]);
   const chordAt = (t) => {
     let cur = segs[0]?.[2] || "";
     for (const [t0, , name] of segs) if (t0 <= t + 0.15) cur = name;

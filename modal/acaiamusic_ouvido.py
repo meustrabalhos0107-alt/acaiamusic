@@ -56,7 +56,23 @@ def _acordes(path):
             v[[(i + k) % 12 for k in iv]] = [1.0, 0.8, 0.9]
             tpl.append(v / np.linalg.norm(v))
             names.append(NOTAS[i] + q)
+    # tom: perfis de Krumhansl sobre o cromagrama médio
+    maj = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+    mnr = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+    prof = chroma.mean(axis=1)
+    cands = [(np.corrcoef(np.roll(maj, i), prof)[0, 1], NOTAS[i]) for i in range(12)]
+    cands += [(np.corrcoef(np.roll(mnr, i), prof)[0, 1], NOTAS[i] + "m") for i in range(12)]
+    key = max(cands)[1]
     sc = np.array(tpl) @ cn  # 24 x n
+    # acordes do tom (campo harmônico) ganham preferência; os de fora só vencem com sinal forte
+    root = NOTAS.index(key.rstrip("m"))
+    if key.endswith("m"):
+        diat = [(0, "m"), (3, ""), (5, "m"), (7, "m"), (7, ""), (8, ""), (10, "")]
+    else:
+        diat = [(0, ""), (2, "m"), (4, "m"), (5, ""), (7, ""), (9, "m"), (10, "")]
+    allowed = {NOTAS[(root + iv) % 12] + q for iv, q in diat}
+    weight = np.array([1.0 if nm in allowed else 0.82 for nm in names])[:, None]
+    sc = sc * weight
     # Viterbi: trocar de acorde custa um pouco (evita trocas a cada batida)
     n, pen = sc.shape[1], 0.07
     dp = np.zeros_like(sc)
@@ -82,13 +98,6 @@ def _acordes(path):
             segs[-1][1] = t1
         else:
             segs.append([t0, t1, name])
-    # tom: perfis de Krumhansl sobre o cromagrama médio
-    maj = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-    mnr = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-    prof = chroma.mean(axis=1)
-    cands = [(np.corrcoef(np.roll(maj, i), prof)[0, 1], NOTAS[i]) for i in range(12)]
-    cands += [(np.corrcoef(np.roll(mnr, i), prof)[0, 1], NOTAS[i] + "m") for i in range(12)]
-    key = max(cands)[1]
     return segs, key, float(np.atleast_1d(tempo)[0])
 
 
