@@ -216,6 +216,34 @@ function singable(line) {
     .trim();
 }
 
+// Ordem em que a música é CANTADA. Na letra o refrão costuma vir escrito uma vez só, mas
+// num canto de "refrão + estrofes" ele volta depois de cada estrofe. Sem isso o estúdio
+// canta o refrão 1 vez e a música termina incompleta.
+function sungOrder(sections) {
+  const sung = sections.filter((s) => s.lines.length);
+  const choruses = sung.filter((s) => tagFor(s.name) === "chorus");
+  const verses = sung.filter((s) => tagFor(s.name) === "verse");
+  if (choruses.length !== 1 || verses.length < 2) return sections;
+  const chorus = choruses[0];
+  const out = [];
+  let lastWasChorus = false;
+  for (const s of sections) {
+    if (s === chorus) {
+      if (!lastWasChorus) out.push(s);
+      lastWasChorus = true;
+      continue;
+    }
+    out.push(s);
+    lastWasChorus = false;
+    if (tagFor(s.name) === "verse") {
+      out.push(chorus);
+      lastWasChorus = true;
+    }
+  }
+  if (tagFor(sections[0]?.name || "") === "chorus" && out[0] !== chorus) out.unshift(chorus);
+  return out;
+}
+
 function toAceLyrics(sections) {
   const parts = sections.map((s) => {
     const tag = tagFor(s.name);
@@ -355,14 +383,17 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     // A letra precisa caber no tempo: cantando com calma são ~2,5 sílabas por segundo, mais
     // ~20 s de introdução, respiros e final. Se não couber, a música fica mais longa (até o
     // limite) em vez de o modelo atropelar ou pular versos.
-    const sung = options.voice === "Instrumental" ? "" : plan.sections.flatMap((s) => s.lines).join(" ");
+    const order = sungOrder(plan.sections);
+    const sung = options.voice === "Instrumental" ? "" : order.flatMap((s) => s.lines).join(" ");
     const syllables = (sung.toLowerCase().match(/[aeiouáéíóúâêôãõàü]+/g) || []).length;
-    const needed = Math.ceil(syllables / 2.5 + 20);
+    // canto litúrgico é calmo (~2,2 sílabas/s) + introdução, um respiro entre as partes e o final
+    const parts = order.filter((s) => s.lines.length).length;
+    const needed = sung ? Math.ceil(syllables / 2.2 + 14 + parts * 3 + 8) : 0;
     const seconds = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, Math.max(duration, needed)));
     if (needed > duration) console.log(`Letra longa (${syllables} sílabas): duração ${duration}s → ${seconds}s para caber tudo`);
     const params = {
       prompt: buildTags(options, plan.styles),
-      lyrics: options.voice === "Instrumental" ? "[instrumental]" : toAceLyrics(plan.sections),
+      lyrics: options.voice === "Instrumental" ? "[instrumental]" : toAceLyrics(order),
       audio_duration: seconds,
       infer_step: options.quality === "high" ? 16 : 8,
       guidance_scale: 7,
@@ -403,10 +434,29 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     };
     // Estúdio do Kaggle ligado só no modo processador (sem GPU, ~15-20 min por música)?
     // Então tenta primeiro os estúdios rápidos do Hugging Face; o processador fica de reserva.
+    // Estúdio no Modal: GPU que liga só para esta música (~1-2 min), paga com os créditos grátis do mês
+    let modalTried = false;
+    const tryModal = async () => {
+      modalTried = true;
+      if (!modalConfigured()) return null;
+      const h = await wakeModal(set);
+      if (!h.ok) return console.log("Modal indisponível:", h.error), null;
+      try {
+        const out = await generateKaggle({ params, options, language, reference }, set, "modal");
+        engine = "Seu estúdio no Modal";
+        return out;
+      } catch (e) {
+        if (job.canceled) throw e;
+        console.log("Modal falhou, indo para os estúdios gratuitos:", e?.message);
+        return null;
+      }
+    };
     if (getSettings().kaggleCpu && kaggleConfigured() && (await kaggleHealth()).ok) {
       set({ status: "connecting", message: "Seu estúdio está sem GPU agora: tentando o estúdio rápido…" });
       raw = await tryHF();
     }
+    // Kaggle só com processador leva ~16 min: o Modal (GPU) vem antes
+    if (!raw && getSettings().kaggleCpu && modalConfigured()) raw = await tryModal();
     // 1º: o seu estúdio no Kaggle (gratuito, sem limite diário) — liga sozinho se estiver desligado
     if (!raw && (kaggleConfigured() || KAGGLE_USER)) {
       set({ status: "connecting", message: "Conectando ao seu estúdio no Kaggle…" });
@@ -429,18 +479,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       } else console.log("Kaggle indisponível:", h.error);
     }
     // 1º-B: o seu estúdio no Modal (créditos grátis do mês; liga a GPU só agora)
-    if (!raw && modalConfigured()) {
-      const h = await wakeModal(set);
-      if (h.ok) {
-        try {
-          raw = await generateKaggle({ params, options, language, reference }, set, "modal");
-          engine = "Seu estúdio no Modal";
-        } catch (e) {
-          if (job.canceled) throw e;
-          console.log("Modal falhou, indo para os estúdios gratuitos:", e?.message);
-        }
-      } else console.log("Modal indisponível:", h.error);
-    }
+    if (!raw && !modalTried) raw = await tryModal();
     // 2º e 3º: estúdios gratuitos do Hugging Face (o principal e depois os outros, um por um)
     if (job.canceled) throw new Error("CANCELED");
     if (!raw && !hfTried) raw = await tryHF();
