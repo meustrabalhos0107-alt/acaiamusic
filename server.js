@@ -7,7 +7,7 @@ import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client, handle_file } from "@gradio/client";
 import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, refineLyrics, sanitizeChords, writeLyrics } from "./lyrics.js";
-import { wavToMp3 } from "./audio.js";
+import { masterOrPlain } from "./audio.js";
 import { registerStudio } from "./studio.js";
 import { initSettings, getSettings, saveSettings, kaggleHealth, kaggleConfigured, generateKaggle, modalConfigured, modalStatus, wakeModal } from "./kaggle.js";
 import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio, requestGpu } from "./kaggle-auto.js";
@@ -421,8 +421,10 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     if (!raw && !hfTried) raw = await tryHF();
     if (job.canceled) throw new Error("CANCELED");
     if (!raw) throw hfErr || new Error("runs limit: todos os estúdios gratuitos estão no limite agora");
-    set({ status: "saving", message: "Masterizando e salvando em MP3…" });
-    const { mp3, seconds: realSeconds } = wavToMp3(raw);
+    set({ status: "saving", message: "Masterizando (volume e brilho de streaming)…" });
+    // ffmpeg num processo à parte: converter/masterizar aqui dentro travava o servidor grátis
+    // (o Render achava que o app tinha morrido e o reiniciava sem parar)
+    const { mp3, seconds: realSeconds, mastered } = await masterOrPlain(raw);
     if (job.canceled) throw new Error("CANCELED");
     await fs.writeFile(path.join(SONGS_DIR, `${id}.mp3`), mp3);
 
@@ -452,6 +454,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
         quality: options.quality,
         engine: reference ? `${engine} · com áudio de referência` : engine,
         musicPrompt: params.prompt,
+        mastered: Boolean(mastered),
         generationSeconds: Math.round((Date.now() - startedAt) / 1000),
       },
       url: `/audio/${id}.mp3`,

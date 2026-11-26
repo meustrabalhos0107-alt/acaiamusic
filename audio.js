@@ -66,3 +66,72 @@ export function mixTracks(tracks) {
   }
   return { rate: tracks[0].rate, left, right, seconds: len / tracks[0].rate };
 }
+
+// ---------- Masterização (ffmpeg) ----------
+// Deixa a música no padrão das plataformas de streaming: tira o ronco grave, limpa o "embolado"
+// dos médios-graves, dá brilho leve, cola a mixagem com compressão suave e acerta o volume em
+// -13 LUFS (perto do padrão do Spotify/YouTube, com presença no celular) sem estourar (pico máximo -1 dBTP). Duas passadas:
+// a 1ª mede a música, a 2ª aplica a correção exata (mais natural que a correção "ao vivo").
+import { spawn as spawnProc } from "node:child_process";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import ffmpegBin from "ffmpeg-static";
+
+function runFfmpeg(args, timeoutMs = 180000) {
+  return new Promise((resolve, reject) => {
+    const p = spawnProc(ffmpegBin, ["-hide_banner", "-nostats", "-y", "-threads", "1", ...args], { windowsHide: true });
+    try { os.setPriority(p.pid, 19); } catch {} // prioridade baixa: o app continua respondendo
+    let err = "";
+    p.stderr.on("data", (d) => (err = (err + d).slice(-20000)));
+    const t = setTimeout(() => p.kill("SIGKILL"), timeoutMs);
+    p.on("error", (e) => (clearTimeout(t), reject(e)));
+    p.on("close", (code) => (clearTimeout(t), code === 0 ? resolve(err) : reject(new Error(err.trim().split("\n").pop() || `ffmpeg ${code}`))));
+  });
+}
+
+const TONE = "highpass=f=28,equalizer=f=280:t=q:w=1.2:g=-1.5,treble=g=1.5:f=9500,acompressor=threshold=-20dB:ratio=1.8:attack=25:release=280:makeup=1.5";
+
+export async function master(buf) {
+  const id = randomUUID();
+  const src = path.join(os.tmpdir(), `acaia-src-${id}`);
+  const out = path.join(os.tmpdir(), `acaia-master-${id}.mp3`);
+  try {
+    await fsp.writeFile(src, buf);
+    const log1 = await runFfmpeg(["-i", src, "-af", `${TONE},loudnorm=I=-13:TP=-1:LRA=11:print_format=json`, "-f", "null", "-"]);
+    const m = JSON.parse(log1.slice(log1.lastIndexOf("{"), log1.lastIndexOf("}") + 1));
+    const ln = `loudnorm=I=-13:TP=-1:LRA=11:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
+    const log2 = await runFfmpeg(["-i", src, "-af", `${TONE},${ln}`, "-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "256k", out]);
+    const d = /time=(\d+):(\d+):([\d.]+)/g;
+    let secs = 0;
+    for (const x of log2.matchAll(d)) secs = Number(x[1]) * 3600 + Number(x[2]) * 60 + Number(x[3]);
+    return { mp3: await fsp.readFile(out), seconds: secs, mastered: true };
+  } finally {
+    fsp.rm(src, { force: true }).catch(() => {});
+    fsp.rm(out, { force: true }).catch(() => {});
+  }
+}
+
+// Masteriza; se o ffmpeg falhar por qualquer motivo, salva a música como veio (nunca perde a música)
+export async function masterOrPlain(buf) {
+  try {
+    return await master(buf);
+  } catch (e) {
+    console.log("Masterização pulada:", e.message);
+  }
+  // reserva: só converte para MP3, também à parte (nunca dentro do processo do app)
+  const id = randomUUID();
+  const src = path.join(os.tmpdir(), `acaia-plain-${id}`), out = src + ".mp3";
+  try {
+    await fsp.writeFile(src, buf);
+    await runFfmpeg(["-i", src, "-c:a", "libmp3lame", "-b:a", "192k", out]);
+    return { mp3: await fsp.readFile(out), seconds: 0, mastered: false };
+  } catch (e) {
+    console.log("Conversão simples falhou, salvando como veio:", e.message);
+    return { mp3: buf, seconds: 0, mastered: false };
+  } finally {
+    fsp.rm(src, { force: true }).catch(() => {});
+    fsp.rm(out, { force: true }).catch(() => {});
+  }
+}
