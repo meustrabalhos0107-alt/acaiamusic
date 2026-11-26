@@ -32,7 +32,7 @@ image = (
 
 @app.function(
     image=image,
-    gpu="L4",  # GPU nova (bfloat16): na T4 o ACE-Step 1.5 gera NaN (som vazio) em músicas longas
+    gpu=["L4", "A10G", "L40S"],  # GPUs novas (bfloat16; na T4 o ACE-Step gera NaN em músicas longas). Se faltar L4, usa a próxima
     secrets=[modal.Secret.from_name("acaiamusic")],
     scaledown_window=300,  # desliga sozinho 5 min depois da última música (a próxima não recarrega os modelos)
     max_containers=1,  # nunca liga mais de uma GPU

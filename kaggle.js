@@ -54,14 +54,30 @@ export function modalStatus() {
 export async function wakeModal(set, url = settings.modalUrl, key = settings.modalKey) {
   const t0 = Date.now();
   let last = { ok: false, error: "não respondeu" };
-  while (Date.now() - t0 < 20 * 60 * 1000) {
+  // o relógio anda sozinho: a resposta do Modal pode demorar minutos enquanto a GPU liga
+  let stop = null; // música cancelada: para de esperar
+  const tick = () => {
     const secs = Math.round((Date.now() - t0) / 1000);
-    set?.({ status: "connecting", message: `Ligando o seu estúdio no Modal… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")} (1ª vez demora mais)` });
-    last = await kaggleHealth(url, key, 150000);
-    if (last.ok || /Chave incorreta|Endereço inválido/.test(last.error)) return last;
-    await new Promise((r) => setTimeout(r, 5000));
+    try {
+      set?.({ status: "connecting", message: `Ligando o seu estúdio no Modal (GPU)… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")} · costuma levar de 2 a 5 min quando estava desligado` });
+    } catch (e) {
+      stop = e;
+    }
+  };
+  tick();
+  const clock = setInterval(tick, 5000);
+  try {
+    while (Date.now() - t0 < 20 * 60 * 1000) {
+      if (stop) throw stop;
+      last = await kaggleHealth(url, key, 150000);
+      if (stop) throw stop;
+      if (last.ok || /Chave incorreta|Endereço inválido/.test(last.error)) return last;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    return last;
+  } finally {
+    clearInterval(clock);
   }
-  return last;
 }
 
 // "G major" -> "G Major"; "" -> ""

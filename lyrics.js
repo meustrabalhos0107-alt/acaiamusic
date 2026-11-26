@@ -223,20 +223,31 @@ export function buildTags(o, aiStyles = []) {
       .flatMap((t) => String(t).split(","))
       .map((t) => t.trim())
       .filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
-  // Som humano e natural: gravação ao vivo, com músicos e cantores de verdade, em vez do som
-  // "perfeito demais" (e artificial) de produção polida. Sempre entra, nunca é cortado.
-  const human = uniq(humanTags(o));
+  // Som atual e natural: produção moderna e limpa (como a música que toca hoje), melodia marcante e
+  // voz humana expressiva. Antes era "gravação ao vivo, analógica, com respiração", que soava antigo.
+  // Sempre entra, nunca é cortado.
+  const human = uniq(modernTags(o));
   return [...uniq(tags).slice(0, 22 - human.length), ...human].join(", ");
 }
 
-function humanTags(o) {
+// estilos tradicionais (coral, gregoriano, órgão, polifonia): ficam tradicionais, só com produção limpa
+const TRADITIONAL = /gregorian|chant|choir|choral|satb|polyphon|organ|hymn|cathedral|a cappella|renaissance|baroque/i;
+function modernTags(o) {
   const instrumental = o.voice === "Instrumental";
-  const t = ["live recording, real musicians playing together", "organic dynamics, natural timing and groove", "warm acoustic room ambience, analog warmth"];
+  const traditional = TRADITIONAL.test(String(o.genreTags || ""));
+  const t = traditional
+    ? ["clean modern recording, clear and balanced mix", "beautiful memorable melody, natural dynamics"]
+    : [
+        "modern contemporary production, clean professional mix, wide stereo",
+        "catchy memorable melody with a strong chorus hook, modern song structure",
+        "dynamic build from verse to chorus, real instruments, natural groove",
+      ];
+  if (o.mode === "catolica" && !traditional) t.unshift("contemporary Catholic worship music, modern Brazilian Catholic praise style");
   if (!instrumental)
-    t.unshift(
+    t.push(
       o.mode === "catolica"
-        ? "natural human voice singing with heartfelt emotion, audible breaths, sung in a real church"
-        : "natural expressive human vocals, audible breaths, emotional phrasing",
+        ? "natural expressive human voice, warm real vocal timbre, no autotune, heartfelt and prayerful, clear diction, vocals up front"
+        : "natural expressive human vocals, warm real vocal timbre, no autotune, emotional phrasing, clear diction, vocals up front",
     );
   return t;
 }
