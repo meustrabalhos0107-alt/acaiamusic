@@ -16,8 +16,9 @@ const STEM_NAMES = ["vocals", "bass", "drums", "other"];
 export function modalSeparatorUrl() {
   const s = getSettings();
   if (s.modalSepUrl) return s.modalSepUrl;
-  const re = /-estudio\.modal\.run\/?$/;
-  return re.test(s.modalUrl || "") ? s.modalUrl.replace(re, "-separar.modal.run") : "";
+  // ex.: https://conta--acaiamusic-estudio-estudio.us-east.modal.run -> ...-separar.us-east.modal.run
+  const re = /-estudio((?:\.[a-z0-9-]+)?)\.modal\.run\/?$/;
+  return re.test(s.modalUrl || "") ? s.modalUrl.replace(re, "-separar$1.modal.run") : "";
 }
 async function demucsModal(mp3Buffer, onStatus) {
   onStatus("Separando voz e instrumentos na GPU do seu estúdio (Modal)…");
