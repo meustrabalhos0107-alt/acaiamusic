@@ -200,10 +200,26 @@ const TAGS = [
 ];
 const tagFor = (name) => (TAGS.find(([re]) => re.test(name)) || [, "verse"])[1];
 
+// Texto limpo para o modelo de música cantar: caracteres "especiais" (hífen inseparável, aspas
+// curvas, travessões, espaços invisíveis, emojis) viram sons desconhecidos e o canto se perde da letra.
+function singable(line) {
+  return String(line)
+    .normalize("NFC")
+    .replace(/[‐-―−]/g, "-")
+    .replace(/[‘’‛´`]/g, "'")
+    .replace(/[“”«»]/g, '"')
+    .replace(/[  -​  ﻿]/g, " ")
+    .replace(/…/g, "...")
+    .replace(/[^\p{L}\p{N}\s.,;:!?'"()\-]/gu, "")
+    .replace(/\s*-\s+/g, ", ") // travessão no meio da frase vira pausa
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function toAceLyrics(sections) {
   const parts = sections.map((s) => {
     const tag = tagFor(s.name);
-    const lines = s.lines.map((l) => l.replace(/^\s*[\[(][^\])]{1,20}[\])]\s*[:\-–]?\s*/, "")).filter(Boolean);
+    const lines = s.lines.map((l) => singable(l.replace(/^\s*[\[(][^\])]{1,20}[\])]\s*[:\-–]?\s*/, ""))).filter(Boolean);
     const Tag = tag[0].toUpperCase() + tag.slice(1); // formato da documentação do ACE-Step: [Verse], [Chorus]…
     return lines.length ? `[${Tag}]\n${lines.join("\n")}` : `[${Tag}]\n[Instrumental]`;
   });
