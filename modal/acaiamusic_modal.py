@@ -53,6 +53,7 @@ def estudio():
         ACESTEP_CHECKPOINTS_DIR="/models",
         HF_HOME="/models/hf",
         ACESTEP_GENERATION_TIMEOUT="3600",
+        ACESTEP_NO_INIT="false",  # carrega os modelos ao ligar (o pré-aquecimento já deixa tudo pronto)
     )
     subprocess.Popen(["uv", "run", "acestep-api"], cwd="/app", env=env)
 

@@ -481,6 +481,15 @@ $$("#quality button").forEach((b) =>
   }),
 );
 $("#idea").addEventListener("input", (e) => ($("#idea-count").textContent = `${e.target.value.length}/1500`));
+// Pré-aquecimento: ao começar a escrever, o app já liga o estúdio de GPU (leva ~4 min);
+// quando a pessoa tocar em "Criar", ele está pronto. No máximo 1 aviso a cada 4 min.
+let warmedAt = 0;
+function warmStudio() {
+  if (Date.now() - warmedAt < 4 * 60 * 1000) return;
+  warmedAt = Date.now();
+  fetch("/api/studio/warm", { method: "POST" }).catch(() => {});
+}
+["idea", "reading", "lyrics"].forEach((id) => $("#" + id)?.addEventListener("input", warmStudio));
 
 // Áudio de referência
 $("#ref-file").addEventListener("change", (e) => {
@@ -740,6 +749,7 @@ function handleLyricsError(e) {
 }
 
 async function generateLyrics(btn) {
+  warmStudio();
   const o = musicOptions();
   const idea = $("#idea").value.trim();
   if (!idea && o.mode === "livre") {

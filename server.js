@@ -1117,6 +1117,24 @@ app.post("/api/settings", async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Pré-aquecimento do estúdio no Modal ----------
+// A GPU do Modal leva ~4 min para ligar e carregar os modelos. Assim que a pessoa começa a
+// escrever a ideia ou a letra, o app já manda ligar: quando ela tocar em "Criar", está pronto.
+// Só liga se o Modal for mesmo ser usado (o Kaggle está sem GPU) e no máximo a cada 4 min.
+let warmAt = 0;
+app.post("/api/studio/warm", async (_req, res) => {
+  res.json({ ok: true });
+  if (!modalConfigured() || Date.now() - warmAt < 4 * 60 * 1000) return;
+  const s = getSettings();
+  if (kaggleConfigured() && !s.kaggleCpu && (await kaggleHealth()).ok) return; // Kaggle com GPU grátis: não gasta crédito
+  warmAt = Date.now();
+  console.log("Modal: pré-aquecendo o estúdio");
+  fetch(`${s.modalUrl.replace(/\/+$/, "")}/health`, {
+    headers: s.modalKey ? { Authorization: `Bearer ${s.modalKey}` } : {},
+    signal: AbortSignal.timeout(10 * 60 * 1000),
+  }).catch(() => {});
+});
+
 // ---------- Manter acordado ----------
 // O Render grátis "dorme" depois de ~15 min sem visitas, mesmo com músicas na fila: o trabalho
 // parava no meio e o estúdio do Kaggle ficava ligado sem ninguém usar. Enquanto houver trabalho
