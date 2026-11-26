@@ -1388,6 +1388,29 @@ async function albumsForSong(song) {
   });
 }
 
+// ---------------- Registro de Criação (gratuito) ----------------
+async function registroSong(song) {
+  const last = song.registros?.at(-1);
+  const name = prompt(
+    `Registro de Criação de “${song.title}”\n\nGera um documento com a letra, a cifra, a impressão digital do áudio, a data, o seu nome e a declaração de uso de IA, com carimbo de tempo GRATUITO (OpenTimestamps). Só o código do documento é enviado; a letra e o seu nome não saem do app.\n\nSeu nome completo:`,
+    last?.author || localStorage.getItem("acaia-autor") || "",
+  );
+  if (!name || !name.trim()) return;
+  localStorage.setItem("acaia-autor", name.trim());
+  const win = window.open("about:blank", "_blank"); // abre já: o navegador bloqueia janelas abertas depois de esperar
+  toast("📜 Gerando o registro e o carimbo de tempo…", false, 4000);
+  try {
+    const reg = await api(`/api/songs/${song.id}/registro`, { method: "POST", body: JSON.stringify({ author: name.trim() }) });
+    song.registros = [...(song.registros || []).filter((r) => r.file !== reg.file), reg];
+    const url = `/api/songs/${song.id}/registro/${reg.file}/pagina`;
+    if (win) win.location = url;
+    else location.href = url;
+  } catch (e) {
+    win?.close();
+    toast(e.message, true, 8000);
+  }
+}
+
 // ---------------- Refazer com revisão de pronúncia ----------------
 // Grava a música de novo do mesmo jeito; o Whisper ouve e, se a letra não estiver clara, o estúdio
 // grava outra (até 3) e fica a melhor. A nova gravação substitui a antiga no mesmo lugar.
@@ -1935,6 +1958,7 @@ function openSong(song) {
   $("#dlg-fav").onclick = () => toggleFav(song);
   $("#dlg-album").onclick = () => albumsForSong(song);
   $("#dlg-redo").onclick = () => redoSong(song);
+  $("#dlg-registro").onclick = () => registroSong(song);
   $("#dlg-reuse").onclick = () => {
     if (song.options) applySpec(song);
     state.lastOptions = song.options || null;

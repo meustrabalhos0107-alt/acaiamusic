@@ -9,6 +9,8 @@ import { Client, handle_file } from "@gradio/client";
 import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, refineLyrics, sanitizeChords, writeLyrics } from "./lyrics.js";
 import { masterOrPlain } from "./audio.js";
 import { chordSheetFromAudio, hearingUrl, lyricScore, listen } from "./hearing.js";
+import { createRegistro, registroPage } from "./registro.js";
+import { createHash } from "node:crypto";
 import { registerStudio } from "./studio.js";
 import { initSettings, getSettings, saveSettings, kaggleHealth, kaggleConfigured, generateKaggle, modalConfigured, modalStatus, wakeModal } from "./kaggle.js";
 import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio, requestGpu } from "./kaggle-auto.js";
@@ -830,6 +832,60 @@ app.post("/api/songs", (req, res) => {
   };
   enqueueSong(id, input, { label: plan.title });
   res.json({ jobId: id });
+});
+
+// ---------- Registro de Criação (gratuito: carimbo de tempo no OpenTimestamps) ----------
+const REG_DIR = path.join(DATA_DIR, "registros");
+const fileSafe = (t) => String(t || "musica").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w -]+/g, "").trim().slice(0, 60) || "musica";
+app.post("/api/songs/:id/registro", async (req, res) => {
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  const author = String(req.body?.author || getSettings().autorNome || "").replace(/\s+/g, " ").trim().slice(0, 120);
+  if (author.length < 3) return res.status(400).json({ error: "Escreva o seu nome completo para o registro." });
+  let audio;
+  try {
+    audio = await fs.readFile(path.join(SONGS_DIR, `${song.id}.mp3`));
+  } catch {
+    return res.status(404).json({ error: "O áudio desta música não foi encontrado." });
+  }
+  const audioSha = createHash("sha256").update(audio).digest("hex");
+  // o mesmo áudio e o mesmo nome já registrados: devolve o registro existente (a data não muda)
+  const same = (song.registros || []).find((r) => r.audioSha256 === audioSha && r.author === author);
+  if (same && !req.body?.novo) return res.json(same);
+  try {
+    const r = await createRegistro(song, { author, audio });
+    await fs.mkdir(REG_DIR, { recursive: true });
+    const file = `${song.id}-${Date.parse(r.at)}`;
+    await fs.writeFile(path.join(REG_DIR, file + ".txt"), r.text);
+    await fs.writeFile(path.join(REG_DIR, file + ".txt.ots"), r.ots);
+    const meta = { at: r.at, author, audioSha256: r.audioSha256, docSha256: r.docSha256, calendars: r.calendars, file };
+    await updateSongs((songs) => songs.map((s) => (s.id === song.id ? { ...s, registros: [...(s.registros || []), meta] } : s)));
+    if (getSettings().autorNome !== author) await saveSettings({ autorNome: author });
+    res.json(meta);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+const regFile = async (req) => {
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  const reg = song?.registros?.find((r) => r.file === req.params.file);
+  return { song, reg };
+};
+app.get("/api/songs/:id/registro/:file/texto", async (req, res) => {
+  const { song, reg } = await regFile(req);
+  if (!reg) return res.status(404).send("Registro não encontrado.");
+  res.download(path.join(REG_DIR, reg.file + ".txt"), `${fileSafe(song.title)} - Registro de Criacao.txt`);
+});
+app.get("/api/songs/:id/registro/:file/prova", async (req, res) => {
+  const { song, reg } = await regFile(req);
+  if (!reg) return res.status(404).send("Registro não encontrado.");
+  res.download(path.join(REG_DIR, reg.file + ".txt.ots"), `${fileSafe(song.title)} - Registro de Criacao.txt.ots`);
+});
+app.get("/api/songs/:id/registro/:file/pagina", async (req, res) => {
+  const { song, reg } = await regFile(req);
+  if (!reg) return res.status(404).send("Registro não encontrado.");
+  const text = await fs.readFile(path.join(REG_DIR, reg.file + ".txt"), "utf8");
+  res.type("html").send(registroPage({ song, reg, text, base: `/api/songs/${song.id}/registro/${reg.file}` }));
 });
 
 // Refazer a música do mesmo jeito (letra, estilo, vozes), com revisão de pronúncia pelo Whisper.
