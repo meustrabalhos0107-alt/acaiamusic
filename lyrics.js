@@ -129,6 +129,9 @@ Princípios obrigatórios:
 4. Respeite o tempo litúrgico: Advento (espera, vigilância, esperança, sem Glória); Natal (encarnação, alegria); Quaresma (conversão, penitência, misericórdia, SEM a palavra "aleluia"); Páscoa (ressurreição, aleluia); Pentecostes (Espírito Santo); Tempo Comum (seguimento, Palavra).
 5. Se houver leitura base, inspire-se nela de perto e cite as referências bíblicas usadas.
 6. Escreva ORIGINAL: não copie cantos existentes.
+7. SENTIDO acima de tudo: a letra tem UMA ideia central, dita no refrão; cada estrofe desenvolve essa ideia num passo claro (ex.: quem é Deus → o que Ele faz por nós → nossa resposta). Cada verso é uma frase completa e compreensível, ligada ao verso anterior. Nada de versos soltos só para rimar.
+8. Português natural e correto: ordem direta das palavras (sem inversões forçadas tipo "a ti louvor nós vamos dar"), concordância e regência corretas, palavras que o povo usa. Se a rima forçar uma frase estranha, troque a rima, não o sentido.
+9. Imagens concretas e coerentes (luz, pão, caminho, pastor), sem misturar metáforas que se contradizem.
 Responda SOMENTE com JSON válido, sem texto fora dele:
 {"title":"título curto","styles":["4 a 6 tags EM INGLÊS do som sacro: estilo, instrumentos, clima"],"references":["referências bíblicas usadas, ex.: Jo 6,35"],"notes":"1 frase sobre como cantar (quem canta o quê)","sections":[{"name":"Refrão|Estrofe 1|…","lines":["verso","verso"]}]}
 Cada verso com no máximo 70 caracteres.`;
@@ -137,7 +140,7 @@ const SYSTEM_FREE = `Você é um compositor profissional. Escreva músicas ORIGI
 Nunca copie letras existentes nem cite artistas reais.
 Responda SOMENTE com JSON válido, sem texto fora dele:
 {"title":"título curto e criativo","styles":["5 a 8 tags EM INGLÊS: gênero, instrumentos, clima"],"references":[],"notes":"","sections":[{"name":"Intro|Verso 1|Pré-refrão|Refrão|Verso 2|Ponte|Final","lines":["verso"]}]}
-Regras: revise para que faça sentido e soe natural; respeite o tamanho pedido; versos com no máximo 90 caracteres; seções instrumentais têm "lines": [].`;
+Regras: a letra conta UMA história ou ideia central, com começo, meio e fim; o refrão resume essa ideia; cada verso é uma frase completa e ligada ao anterior; linguagem do dia a dia, ordem direta, gramática correta; imagens concretas; nada de versos soltos só para rimar (se a rima forçar a frase, troque a rima); revise para que faça sentido e soe natural; respeite o tamanho pedido; versos com no máximo 90 caracteres; seções instrumentais têm "lines": [].`;
 
 // ---------- Utilidades ----------
 const strList = (v, n, len = 60) =>
@@ -156,7 +159,8 @@ export function cleanOptions(o = {}) {
     genreTags: str(o.genreTags, 160, "catholic liturgical hymn"),
     moods: strList(o.moods, 3),
     moodTags: strList(o.moodTags, 3),
-    bpm: Math.max(40, Math.min(200, Math.round(Number(o.bpm) || 0))) || 0,
+    // sem andamento escolhido: 0 (o planejador musical escolhe). Antes virava 40 BPM sem querer.
+    bpm: Number(o.bpm) > 0 ? Math.max(40, Math.min(200, Math.round(Number(o.bpm)))) : 0,
     tempo: str(o.tempo, 20, "auto"),
     key: str(o.key, 30),
     instruments: strList(o.instruments, 5),
@@ -212,15 +216,29 @@ export function buildTags(o, aiStyles = []) {
     if (MOMENT_TAGS[o.moment]) tags.splice(1, 0, MOMENT_TAGS[o.moment]); // o momento vem logo após o estilo
     tags.push("sacred, reverent, singable melody for congregation");
   }
-  tags.push(...aiStyles.filter((s) => !/bpm|vocal|voice|key of/i.test(s)));
-  tags.push("high quality production, clear mix");
+  tags.push(...aiStyles.filter((s) => !/bpm|vocal|voice|key of|high quality|clear mix|polished/i.test(s)));
   const seen = new Set();
-  return tags
-    .flatMap((t) => String(t).split(","))
-    .map((t) => t.trim())
-    .filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()))
-    .slice(0, 22)
-    .join(", ");
+  const uniq = (list) =>
+    list
+      .flatMap((t) => String(t).split(","))
+      .map((t) => t.trim())
+      .filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+  // Som humano e natural: gravação ao vivo, com músicos e cantores de verdade, em vez do som
+  // "perfeito demais" (e artificial) de produção polida. Sempre entra, nunca é cortado.
+  const human = uniq(humanTags(o));
+  return [...uniq(tags).slice(0, 22 - human.length), ...human].join(", ");
+}
+
+function humanTags(o) {
+  const instrumental = o.voice === "Instrumental";
+  const t = ["live recording, real musicians playing together", "organic dynamics, natural timing and groove", "warm acoustic room ambience, analog warmth"];
+  if (!instrumental)
+    t.unshift(
+      o.mode === "catolica"
+        ? "natural human voice singing with heartfelt emotion, audible breaths, sung in a real church"
+        : "natural expressive human vocals, audible breaths, emotional phrasing",
+    );
+  return t;
 }
 
 function extractJson(text) {
@@ -237,7 +255,70 @@ export class LyricsError extends Error {
   }
 }
 
+// Compositores melhores (modelos grandes, bons em português), gratuitos, tentados antes do Pollinations:
+// - Google Gemini: chave grátis em aistudio.google.com → "Get API key" (GEMINI_API_KEY)
+// - Hugging Face: token com a permissão "Make calls to Inference Providers" (LYRICS_HF_TOKEN ou HF_TOKEN)
+const list = (v, d) => (v || d).split(",").map((s) => s.trim()).filter(Boolean);
+const PROVIDERS = [
+  {
+    name: "Gemini",
+    url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    token: (process.env.GEMINI_API_KEY || "").trim(),
+    models: list(process.env.GEMINI_MODELS, "gemini-2.5-flash,gemini-2.0-flash"),
+    offUntil: 0,
+  },
+  {
+    name: "Hugging Face",
+    url: "https://router.huggingface.co/v1/chat/completions",
+    token: (process.env.LYRICS_HF_TOKEN || process.env.HF_TOKEN || "").trim(),
+    models: list(process.env.LYRICS_MODELS, "Qwen/Qwen3-235B-A22B-Instruct-2507,meta-llama/Llama-3.3-70B-Instruct"),
+    offUntil: 0,
+  },
+];
+
+async function callProvider(p, system, user) {
+  if (!p.token || Date.now() < p.offUntil) return null;
+  for (const model of p.models) {
+    try {
+      const r = await fetch(p.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.token}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.8,
+          max_tokens: 2500,
+        }),
+        signal: AbortSignal.timeout(90000),
+      });
+      // chave sem permissão ou sem créditos: deixa de lado por 6 h e usa o próximo compositor
+      if ([401, 402, 403].includes(r.status)) {
+        p.offUntil = Date.now() + 6 * 3600 * 1000;
+        console.log(`Compositor ${p.name} indisponível (${r.status}); usando o próximo`);
+        return null;
+      }
+      if (!r.ok) {
+        console.log(`Compositor ${p.name} ${model}: ${r.status}`);
+        continue;
+      }
+      const data = await r.json();
+      return extractJson(data.choices?.[0]?.message?.content || "");
+    } catch (e) {
+      console.log(`Compositor ${p.name} ${model} falhou:`, e.message);
+    }
+  }
+  return null;
+}
+
 async function callLLM(system, user) {
+  for (const p of PROVIDERS) {
+    const out = await callProvider(p, system, user);
+    if (out) return out;
+  }
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -250,6 +331,7 @@ async function callLLM(system, user) {
             { role: "user", content: user },
           ],
           response_format: { type: "json_object" },
+          reasoning_effort: "high", // o modelo gratuito pensa mais antes de escrever: letras mais coerentes
           seed: Math.floor(Math.random() * 1e9),
         }),
         signal: AbortSignal.timeout(120000),
@@ -322,12 +404,50 @@ ${o.voice === "Dueto" ? "- Dueto: alterne partes entre as duas vozes e faça o r
 - Tamanho: ${sizeGuide(duration).replace("estrofe", "verso")}, para cerca de ${duration} segundos`;
   }
 
-  const plan = cleanPlan(await callLLM(system, user), instrumental);
+  let plan = cleanPlan(await callLLM(system, user), instrumental);
+  if (!instrumental) plan = await reviewLyrics(plan, { system, language, brief: user });
   // Quaresma: nada de aleluia
   if (o.mode === "catolica" && /quaresma|semana santa/i.test(o.season)) {
     plan.sections.forEach((s) => (s.lines = s.lines.map((l) => l.replace(/\baleluia\b[!,.]?\s*/gi, "").trim()).filter(Boolean)));
   }
   return plan;
+}
+
+// ---------- Revisão: um 2º olhar que corrige o que não faz sentido ----------
+// Se a revisão falhar (limite do compositor gratuito, resposta ruim), fica a 1ª versão.
+async function reviewLyrics(draft, { system, language, brief }) {
+  const current = draft.sections.map((s) => `[${s.name}]\n${s.lines.join("\n")}`).join("\n\n");
+  const user = `Você agora é o REVISOR desta letra, recém-escrita para o pedido abaixo. Leia em voz alta, verso por verso, e corrija:
+- versos sem sentido, frases incompletas ou que não se ligam ao verso anterior;
+- rimas forçadas que deixaram a frase estranha ou com ordem invertida (troque a rima, preserve o sentido);
+- erros de gramática, concordância, regência e palavras usadas com sentido errado;
+- estrofes que fogem da ideia central do refrão ou se repetem sem acrescentar nada;
+- métrica: versos correspondentes com número parecido de sílabas, para caber na mesma melodia.
+Mantenha o que já está bom, o mesmo idioma (${LANG_NAMES[language] || language}), o título (a menos que não combine), os nomes e a ordem das seções. Devolva a letra COMPLETA no mesmo formato JSON.
+PEDIDO ORIGINAL:
+${brief}
+
+LETRA A REVISAR — título: ${draft.title}
+${current}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const out = cleanPlan(await callLLM(system, user), false);
+      const lines = (p) => p.sections.reduce((a, s) => a + s.lines.length, 0);
+      if (lines(out) < lines(draft) * 0.6) return draft; // revisão cortou demais: fica a original
+      if (!out.references.length) out.references = draft.references;
+      if (!out.styles.length) out.styles = draft.styles;
+      return out;
+    } catch (e) {
+      // o compositor gratuito às vezes pede uma pausa curta entre pedidos
+      if (e instanceof LyricsError && e.retryAfter && e.retryAfter <= 45 && attempt === 0) {
+        await new Promise((r) => setTimeout(r, e.retryAfter * 1000));
+        continue;
+      }
+      console.log("Revisão da letra pulada:", e.message);
+      return draft;
+    }
+  }
+  return draft;
 }
 
 // ---------- Cifra (acordes sobre a letra) ----------

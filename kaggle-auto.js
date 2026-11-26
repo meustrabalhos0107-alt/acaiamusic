@@ -87,7 +87,8 @@ env = dict(os.environ, ACESTEP_API_HOST='127.0.0.1', ACESTEP_API_PORT='8001', AC
            ACESTEP_CONFIG_PATH='acestep-v15-turbo', ACESTEP_INIT_LLM='false', ACESTEP_LM_BACKEND='pt',
            ACESTEP_CHECKPOINTS_DIR=W + '/models')
 env['MPLBACKEND'] = 'Agg'  # o Kaggle define um backend de gráficos que não existe no ambiente do estúdio
-if not GPU: env.update(ACESTEP_DEVICE='cpu', ACESTEP_USE_FLASH_ATTENTION='false', ACESTEP_OFFLOAD_TO_CPU='false')
+if GPU: env.update(ACESTEP_INIT_LLM='true', ACESTEP_LM_MODEL_PATH='acestep-5Hz-lm-1.7B')  # planejador musical: som mais natural
+else: env.update(ACESTEP_DEVICE='cpu', ACESTEP_USE_FLASH_ATTENTION='false', ACESTEP_OFFLOAD_TO_CPU='false')
 server = subprocess.Popen(['uv', 'run', 'acestep-api'], cwd=W + '/ACE-Step-1.5', env=env,
                           stdout=open(W + '/acestep.log', 'w'), stderr=subprocess.STDOUT)
 def stats():

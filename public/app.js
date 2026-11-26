@@ -126,17 +126,89 @@ const GENRES = {
     ["Sertanejo Católico", "sertanejo, christian devotional, viola caipira, accordion", 92],
     ["Pop Católico", "christian pop, modern worship, uplifting", 108],
     ["Orquestral Sacro", "sacred orchestral, strings and choir, majestic", 76],
+    ["Renovação Carismática", "charismatic catholic praise, full band, joyful clapping, uplifting worship", 112],
+    ["Rock Católico", "christian rock, electric guitars, live drums, worship anthem", 120],
+    ["Coral Gospel", "black gospel choir, hammond organ, soulful call and response, hand claps", 90],
+    ["Celta Sacro", "celtic sacred hymn, tin whistle, harp, bodhran, ethereal choir", 80],
+    ["Barroco Sacro", "baroque sacred music, harpsichord, chamber strings, choir, counterpoint", 76],
+    ["A Cappella Sacro", "a cappella sacred vocal ensemble, rich close harmony, no instruments, church acoustics", 70],
+    ["Forró Católico", "forró pé de serra, christian devotional, accordion, zabumba, triangle", 115],
+    ["Samba Católico", "samba, christian devotional, cavaquinho, pandeiro, joyful community singing", 98],
+    ["Reggae Católico", "christian reggae, offbeat guitar, warm bass, peaceful praise", 78],
+    ["Infantil Católico", "children christian song, playful, simple melody, kids choir, hand claps", 108],
+    ["Mariano Tradicional", "traditional marian hymn, gentle organ, tender devotional choir", 72],
+    ["Natal Sacro", "christmas carol, sleigh bells, choir, warm orchestral, joyful nativity", 88],
   ],
   Brasileiros: [
-    ["Sertanejo", "sertanejo, brazilian country", 95], ["Pagode", "pagode, brazilian samba pop", 100], ["Samba", "samba, brazilian samba", 100],
-    ["MPB", "mpb, brazilian popular music", 90], ["Bossa Nova", "bossa nova, smooth brazilian jazz", 80], ["Forró", "forró, northeastern brazilian", 120],
-    ["Piseiro", "piseiro, forró eletrônico", 135], ["Axé", "axé, brazilian carnival", 125], ["Funk", "brazilian funk, baile funk", 130], ["Gospel", "brazilian gospel, worship", 85],
+    ["Sertanejo", "sertanejo, brazilian country, viola caipira, acoustic guitar", 95], ["Sertanejo Universitário", "sertanejo universitario, modern brazilian country pop, accordion, live band", 100],
+    ["Modão / Moda de Viola", "moda de viola, traditional brazilian country, viola caipira duo, rustic", 85], ["Arrocha", "arrocha, romantic brazilian, keyboard, saxophone", 120],
+    ["Pagode", "pagode, brazilian samba pop, cavaquinho, pandeiro, banjo", 100], ["Samba", "samba, brazilian samba, cavaquinho, pandeiro, surdo", 100],
+    ["Samba de Raiz", "samba de raiz, roots samba, acoustic roda de samba, seven string guitar", 96], ["Samba-Enredo", "samba enredo, carnival parade, big percussion bateria, crowd choir", 140],
+    ["Pagode Baiano", "pagode baiano, swingueira, bahia percussion, dance", 128], ["MPB", "mpb, brazilian popular music, acoustic, sophisticated harmony", 90],
+    ["Bossa Nova", "bossa nova, smooth brazilian jazz, nylon guitar, soft vocals", 80], ["Choro", "choro, brazilian instrumental, flute, cavaquinho, seven string guitar, pandeiro", 110],
+    ["Forró Pé de Serra", "forró pé de serra, accordion, zabumba, triangle, northeastern brazilian", 120], ["Forró Eletrônico", "forró eletrônico, keyboards, accordion, dance", 130],
+    ["Piseiro", "piseiro, forró eletrônico, synth keyboard, danceable", 135], ["Xote", "xote, slow forró, accordion, romantic northeastern", 95],
+    ["Baião", "baião, northeastern brazilian, accordion, zabumba, triangle", 115], ["Frevo", "frevo, pernambuco carnival, fast brass, horns", 150],
+    ["Maracatu", "maracatu, afro-brazilian drums, alfaia, pernambuco", 100], ["Axé", "axé, brazilian carnival, bahia, brass and percussion", 125],
+    ["Brega", "brega, romantic brazilian, keyboard, nostalgic", 110], ["Tecnobrega", "tecnobrega, electronic brega, para, synths", 140],
+    ["Carimbó", "carimbó, amazonian brazilian, curimbó drums, banjo, maracas", 120], ["Lambada", "lambada, brazilian dance, accordion, guitar, tropical", 125],
+    ["Vaneira / Gaúcho", "vaneira, southern brazilian gaucho music, accordion, acoustic", 125], ["Funk Carioca", "brazilian funk, baile funk, tamborzão beat", 130],
+    ["Funk Melody", "funk melody, romantic brazilian funk, smooth vocals", 125], ["Rap Nacional", "brazilian rap, portuguese hip hop, boom bap", 90],
+    ["Trap BR", "brazilian trap, 808 bass, hi-hats, melodic rap", 140], ["Rock Nacional", "brazilian rock, 80s brazilian rock band", 125],
+    ["Reggae Nacional", "brazilian reggae, roots reggae, maranhão", 80], ["Gospel", "brazilian gospel, worship, powerful vocals, band", 85],
+    ["Seresta", "seresta, brazilian serenade, nylon guitar, romantic nostalgic", 80], ["Jovem Guarda", "jovem guarda, brazilian 60s pop rock, organ, twang guitar", 125],
   ],
-  Pop: [["Pop", "pop, catchy", 110], ["Balada", "pop ballad, emotional", 72], ["Indie Pop", "indie pop, dreamy", 105], ["Dance Pop", "dance pop, upbeat", 122]],
-  Rock: [["Rock", "rock, electric guitars", 120], ["Acústico", "acoustic rock, unplugged", 95], ["Pop Rock", "pop rock", 118]],
-  Outros: [
-    ["R&B", "r&b, smooth soul", 85], ["Reggae", "reggae, offbeat guitar", 80], ["Jazz", "jazz, swing", 110], ["Lo-fi", "lo-fi hip hop, chill", 80],
-    ["Eletrônica", "electronic dance music", 126], ["Folk", "folk, acoustic storytelling", 95], ["Trilha de Filme", "cinematic soundtrack, epic orchestral", 90], ["Infantil", "children's song, playful", 110],
+  Pop: [
+    ["Pop", "pop, catchy", 110], ["Balada", "pop ballad, emotional, piano", 72], ["Indie Pop", "indie pop, dreamy", 105], ["Dance Pop", "dance pop, upbeat", 122],
+    ["Synthpop", "synthpop, 80s synthesizers, retro", 115], ["Electropop", "electropop, glossy synths, punchy beat", 120], ["Teen Pop", "teen pop, bright, catchy hooks", 118],
+    ["K-Pop", "k-pop, dynamic korean pop, layered production", 124], ["J-Pop", "j-pop, bright japanese pop", 130], ["Pop Acústico", "acoustic pop, guitar and piano, intimate", 95],
+    ["Pop Anos 80", "80s pop, gated reverb drums, synths", 118], ["Pop Anos 90", "90s pop, r&b influenced, nostalgic", 100], ["Bedroom Pop", "bedroom pop, lo-fi, soft vocals", 90],
+  ],
+  Rock: [
+    ["Rock", "rock, electric guitars", 120], ["Acústico", "acoustic rock, unplugged", 95], ["Pop Rock", "pop rock", 118], ["Rock Clássico", "classic rock, 70s, guitar solos", 120],
+    ["Hard Rock", "hard rock, distorted guitars, powerful drums", 130], ["Alternativo", "alternative rock, 90s", 120], ["Indie Rock", "indie rock, jangly guitars", 125],
+    ["Grunge", "grunge, heavy distorted guitars, raw vocals", 110], ["Punk Rock", "punk rock, fast, energetic", 170], ["Pop Punk", "pop punk, energetic, catchy", 165],
+    ["Emo", "emo, emotional rock, dynamic", 150], ["Heavy Metal", "heavy metal, distorted guitars, double bass drums", 140], ["Metal Sinfônico", "symphonic metal, orchestra, choir, operatic vocals", 130],
+    ["Blues Rock", "blues rock, gritty guitar", 105], ["Rock Progressivo", "progressive rock, complex arrangement, keyboards", 110], ["Surf Rock", "surf rock, reverb guitar, retro", 150],
+    ["Rockabilly", "rockabilly, upright bass, slapback echo", 170], ["Post-Rock", "post-rock, atmospheric, crescendo, instrumental guitars", 100],
+  ],
+  Latino: [
+    ["Reggaeton", "reggaeton, dembow beat, latin urban", 95], ["Bachata", "bachata, romantic, requinto guitar, bongos", 128], ["Salsa", "salsa, brass section, piano montuno, congas", 180],
+    ["Merengue", "merengue, fast accordion, tambora, güira", 150], ["Cumbia", "cumbia, accordion, guacharaca, latin folk", 95], ["Tango", "tango, bandoneon, violin, piano, dramatic", 115],
+    ["Flamenco", "flamenco, spanish guitar, palmas, passionate vocals", 120], ["Bolero", "bolero, romantic, nylon guitar, trio vocals", 80], ["Mariachi", "mariachi, trumpets, violins, vihuela", 120],
+    ["Pop Latino", "latin pop, catchy, spanish guitar", 105], ["Latin Jazz", "latin jazz, congas, piano, brass", 100], ["Vallenato", "vallenato, accordion, caja, colombian", 110],
+  ],
+  "Hip-Hop / R&B": [
+    ["Rap", "hip hop, rap, punchy drums", 90], ["Trap", "trap, 808 bass, rolling hi-hats", 140], ["Boom Bap", "boom bap, 90s hip hop, vinyl samples", 90],
+    ["Lo-fi", "lo-fi hip hop, chill, vinyl crackle", 80], ["R&B", "r&b, smooth soul", 85], ["Neo Soul", "neo soul, warm rhodes, live bass", 80],
+    ["Soul", "classic soul, 60s motown, horns", 100], ["Funk", "funk, slap bass, wah guitar, tight groove", 110], ["Disco", "disco, four on the floor, strings, funky bass", 120],
+    ["Gospel Americano", "american gospel, choir, hammond organ, uplifting", 95], ["Drill", "drill, sliding 808, dark", 142],
+  ],
+  "Eletrônica": [
+    ["Eletrônica", "electronic dance music", 126], ["House", "house music, four on the floor", 124], ["Deep House", "deep house, warm bass, mellow", 120],
+    ["Techno", "techno, driving kick, hypnotic", 130], ["Trance", "trance, uplifting synths, euphoric", 138], ["Drum and Bass", "drum and bass, fast breakbeats, deep bass", 174],
+    ["Dubstep", "dubstep, wobble bass, heavy drops", 140], ["EDM", "edm, big room, festival drop", 128], ["Synthwave", "synthwave, retro 80s, analog synths", 100],
+    ["Ambient", "ambient, atmospheric pads, slow evolving", 60], ["Chillout", "chillout, downtempo, relaxing", 90], ["Afro House", "afro house, tribal percussion, deep groove", 122],
+    ["Future Bass", "future bass, lush chords, vocal chops", 150], ["Tropical House", "tropical house, marimba, relaxed", 110],
+  ],
+  "Jazz / Blues": [
+    ["Jazz", "jazz, swing", 110], ["Smooth Jazz", "smooth jazz, saxophone, mellow", 90], ["Big Band", "big band swing, brass section", 160],
+    ["Jazz Vocal", "vocal jazz, piano trio, intimate club", 95], ["Bebop", "bebop, fast jazz, virtuosic", 200], ["Blues", "blues, electric guitar, 12 bar", 90],
+    ["Blues Acústico", "acoustic delta blues, slide guitar, harmonica", 85], ["Swing", "swing, upbeat, vintage", 150], ["Lounge", "lounge, cocktail jazz, relaxed", 95],
+  ],
+  Mundo: [
+    ["Country", "country, steel guitar, fiddle", 100], ["Bluegrass", "bluegrass, banjo, fiddle, mandolin", 130], ["Folk", "folk, acoustic storytelling", 95],
+    ["Celta", "celtic folk, fiddle, tin whistle, bodhran", 110], ["Reggae", "reggae, offbeat guitar", 80], ["Dancehall", "dancehall, jamaican, riddim", 100],
+    ["Afrobeats", "afrobeats, west african pop, percussive groove", 105], ["Amapiano", "amapiano, log drum, south african house", 112], ["Fado", "fado, portuguese guitar, melancholic", 75],
+    ["Música Árabe", "arabic music, oud, darbuka, maqam", 95], ["Bollywood", "bollywood, indian film music, tabla, sitar", 110], ["Música Japonesa", "traditional japanese, koto, shakuhachi", 70],
+    ["Havaiana", "hawaiian, ukulele, slide guitar, island", 95], ["Polca", "polka, accordion, oom-pah", 120], ["Klezmer", "klezmer, clarinet, violin, festive", 130],
+  ],
+  "Clássica / Trilha": [
+    ["Clássica", "classical music, orchestra", 90], ["Piano Solo", "solo piano, expressive, intimate", 75], ["Ópera", "opera, operatic vocals, orchestra", 80],
+    ["Barroco", "baroque, harpsichord, strings", 100], ["Música de Câmara", "chamber music, string quartet", 85], ["Trilha de Filme", "cinematic soundtrack, epic orchestral", 90],
+    ["Épico Orquestral", "epic orchestral, choir, big drums, heroic", 100], ["Trilha de Game", "video game soundtrack, adventurous", 120], ["Musical / Broadway", "broadway musical theatre, showtune", 115],
+    ["Infantil", "children song, playful", 110], ["Canção de Ninar", "lullaby, music box, very soft, soothing", 60], ["Jingle", "commercial jingle, catchy, upbeat", 120],
+    ["Valsa", "waltz, 3/4 time, strings, elegant", 90], ["Marcha", "march, brass band, snare drums", 116],
   ],
 };
 const MOODS = {
@@ -301,12 +373,19 @@ FORMS.forEach(([f, hint]) =>
 );
 
 // Estilo
+function fold(t) { return String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
 function renderGenres() {
   const cats = Object.keys(GENRES).filter((c) => state.mode === "catolica" || c !== "Católica");
+  if (!cats.includes(state.genreCat)) state.genreCat = cats[0];
+  const q = fold($("#genre-search")?.value.trim() || "");
   $("#genre-cats").innerHTML = "";
+  $("#genre-cats").hidden = Boolean(q);
   cats.forEach((cat) => $("#genre-cats").appendChild(button(cat === state.genreCat ? "on" : "", esc(cat), () => ((state.genreCat = cat), renderGenres()))));
   $("#genre-chips").innerHTML = "";
-  GENRES[state.genreCat].forEach((g) =>
+  // com busca: procura em todas as categorias (nome e descrição do som)
+  const list = q ? cats.flatMap((c) => GENRES[c]).filter((g) => fold(g[0] + " " + g[1]).includes(q)) : GENRES[state.genreCat];
+  if (q && !list.length) $("#genre-chips").innerHTML = '<small class="dim">Nenhum estilo com esse nome.</small>';
+  list.forEach((g) =>
     $("#genre-chips").appendChild(
       button(`chip${state.genre[0] === g[0] ? " on" : ""}`, esc(g[0]), () => {
         state.genre = g;
@@ -317,6 +396,8 @@ function renderGenres() {
   );
   $("#sum-genre").textContent = state.genre[0];
 }
+
+$("#genre-search")?.addEventListener("input", () => renderGenres());
 
 // Tempo
 function syncTempo() {

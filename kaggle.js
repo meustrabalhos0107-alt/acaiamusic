@@ -79,13 +79,30 @@ export async function generateKaggle({ params, options, language, reference }, s
     inference_steps: options.quality === "high" ? 16 : 8,
     batch_size: 1,
     audio_format: "mp3",
-    thinking: false,
     task_type: "text2music",
     use_random_seed: true,
   };
   if (options.bpm) fields.bpm = options.bpm;
   const ks = keyScale(options.key);
   if (ks) fields.key_scale = ks;
+  // Com GPU, o planejador musical (5Hz LM) compõe a estrutura e a melodia antes de gravar: soa
+  // bem mais humano e natural (é o modo de melhor qualidade do ACE-Step 1.5). Mantemos a nossa
+  // descrição e o idioma; no modo processador ele fica desligado (seria lento demais).
+  const lm = server === "modal" || !settings.kaggleCpu;
+  Object.assign(fields, lm
+    ? { thinking: true, use_cot_caption: false, use_cot_language: false, lm_temperature: 0.85, lm_cfg_scale: 2.5 }
+    : { thinking: false, use_cot_caption: false, use_cot_language: false });
+  try {
+    return await submitAndWait({ fields, url, key, where, server, reference }, set);
+  } catch (e) {
+    if (!fields.thinking || e.canceled || /CANCELED/.test(e.message)) throw e;
+    console.log(`${where}: falhou com o planejador musical, tentando sem ele:`, e.message);
+    set({ status: "generating", message: `Gravando de novo no ${where} (modo simples)…` });
+    return submitAndWait({ fields: { ...fields, thinking: false }, url, key, where, server, reference }, set);
+  }
+}
+
+async function submitAndWait({ fields, url, key, where, server, reference }, set) {
 
   set({ status: "queued", message: `Enviando para o seu estúdio no ${where}…` });
   let r;

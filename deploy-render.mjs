@@ -24,6 +24,9 @@ const envVars = [
   { key: "APP_PASSWORD", value: env("APP_PASSWORD") },
   { key: "KAGGLE_USERNAME", value: env("KAGGLE_USERNAME") },
   { key: "KAGGLE_API_TOKEN", value: env("KAGGLE_API_TOKEN") },
+  // compositores de letra melhores (opcionais, gratuitos)
+  { key: "GEMINI_API_KEY", value: env("GEMINI_API_KEY") },
+  { key: "LYRICS_HF_TOKEN", value: env("LYRICS_HF_TOKEN") },
 ].filter((v) => v.value);
 
 const existing = (await R("GET", `/services?name=acaiamusic&ownerId=${ownerId}&limit=5`)).map((x) => x.service).find((s) => s?.name === "acaiamusic");

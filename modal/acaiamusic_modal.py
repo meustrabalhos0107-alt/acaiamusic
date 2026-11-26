@@ -47,7 +47,8 @@ def estudio():
         ACESTEP_API_HOST="0.0.0.0",
         ACESTEP_API_PORT="8001",
         ACESTEP_CONFIG_PATH="acestep-v15-turbo",
-        ACESTEP_INIT_LLM="false",
+        ACESTEP_INIT_LLM="true",  # planejador musical (5Hz LM): som mais humano e natural
+        ACESTEP_LM_MODEL_PATH="acestep-5Hz-lm-1.7B",
         ACESTEP_LM_BACKEND="pt",
         ACESTEP_CHECKPOINTS_DIR="/models",
         HF_HOME="/models/hf",

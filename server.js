@@ -204,7 +204,8 @@ function toAceLyrics(sections) {
   const parts = sections.map((s) => {
     const tag = tagFor(s.name);
     const lines = s.lines.map((l) => l.replace(/^\s*[\[(][^\])]{1,20}[\])]\s*[:\-–]?\s*/, "")).filter(Boolean);
-    return lines.length ? `[${tag}]\n${lines.join("\n")}` : `[${tag}]\n[instrumental]`;
+    const Tag = tag[0].toUpperCase() + tag.slice(1); // formato da documentação do ACE-Step: [Verse], [Chorus]…
+    return lines.length ? `[${Tag}]\n${lines.join("\n")}` : `[${Tag}]\n[Instrumental]`;
   });
   const text = parts.join("\n\n");
   return sections.every((s) => !s.lines.length) ? "[instrumental]" : text;
@@ -346,8 +347,43 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     };
 
     let raw = null;
+    let hfTried = false, hfErr = null;
+    // Estúdios gratuitos do Hugging Face (GPU rápida, ~1 min, mas com cota diária por conta)
+    const tryHF = async () => {
+      hfTried = true;
+      if (!reference && !resting(ACE_SPACE)) {
+        try {
+          const client = await getAce();
+          set({ status: "queued", message: "Na fila do estúdio gratuito (rápido)…" });
+          const out = await audioToBuffer(await follow(client.submit("/generate", params), set));
+          engine = "Hugging Face (gratuito)";
+          return out;
+        } catch (e) {
+          if (job.canceled) throw e;
+          rest(ACE_SPACE, String(e?.message));
+          if (/connect|fetch failed|ECONN/i.test(String(e?.message))) aceClient = null;
+          console.log(`Estúdio ${ACE_SPACE} falhou, tentando os outros:`, e?.message);
+        }
+      }
+      try {
+        const out = await audioToBuffer(await generateOn15Spaces({ params, options, language, reference }, set));
+        engine = "Hugging Face (gratuito)";
+        return out;
+      } catch (e) {
+        if (job.canceled) throw e;
+        console.log("Estúdios gratuitos do Hugging Face indisponíveis:", e?.message);
+        hfErr = e;
+        return null;
+      }
+    };
+    // Estúdio do Kaggle ligado só no modo processador (sem GPU, ~15-20 min por música)?
+    // Então tenta primeiro os estúdios rápidos do Hugging Face; o processador fica de reserva.
+    if (getSettings().kaggleCpu && kaggleConfigured() && (await kaggleHealth()).ok) {
+      set({ status: "connecting", message: "Seu estúdio está sem GPU agora: tentando o estúdio rápido…" });
+      raw = await tryHF();
+    }
     // 1º: o seu estúdio no Kaggle (gratuito, sem limite diário) — liga sozinho se estiver desligado
-    if (kaggleConfigured() || KAGGLE_USER) {
+    if (!raw && (kaggleConfigured() || KAGGLE_USER)) {
       set({ status: "connecting", message: "Conectando ao seu estúdio no Kaggle…" });
       let h = { ok: false, error: "desligado" };
       try {
@@ -380,25 +416,11 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
         }
       } else console.log("Modal indisponível:", h.error);
     }
-    // 2º: estúdio gratuito principal do Hugging Face
+    // 2º e 3º: estúdios gratuitos do Hugging Face (o principal e depois os outros, um por um)
     if (job.canceled) throw new Error("CANCELED");
-    if (!raw && !reference && !resting(ACE_SPACE)) {
-      try {
-        const client = await getAce();
-        set({ status: "queued", message: "Na fila do estúdio gratuito…" });
-        raw = await audioToBuffer(await follow(client.submit("/generate", params), set));
-      } catch (e) {
-        rest(ACE_SPACE, String(e?.message));
-        if (/connect|fetch failed|ECONN/i.test(String(e?.message))) aceClient = null;
-        console.log(`Estúdio ${ACE_SPACE} falhou, tentando os outros:`, e?.message);
-      }
-    }
-    // 3º: os outros estúdios gratuitos, um por um
+    if (!raw && !hfTried) raw = await tryHF();
     if (job.canceled) throw new Error("CANCELED");
-    if (!raw) {
-      raw = await audioToBuffer(await generateOn15Spaces({ params, options, language, reference }, set));
-      engine = "Hugging Face (gratuito)";
-    }
+    if (!raw) throw hfErr || new Error("runs limit: todos os estúdios gratuitos estão no limite agora");
     set({ status: "saving", message: "Masterizando e salvando em MP3…" });
     const { mp3, seconds: realSeconds } = wavToMp3(raw);
     if (job.canceled) throw new Error("CANCELED");

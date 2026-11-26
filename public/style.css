@@ -159,7 +159,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 .chip.dim { opacity: 0.35; }
 .tags span { font-family: var(--mono); font-size: 0.66rem; padding: 4px 8px; border-radius: 6px; background: #1a1424; color: #d8b4fe; border: 1px solid #2e2340; }
 
-.cat-tabs { display: flex; gap: 2px; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+.cat-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.genre-search { width: 100%; margin-bottom: 8px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--text); font: inherit; font-size: 0.85rem; }
+.genre-search:focus { outline: none; border-color: var(--accent-2); }
 .cat-tabs button { border: 0; background: none; color: var(--dim); font-weight: 700; font-size: 0.76rem; padding: 7px 11px; border-bottom: 2px solid transparent; white-space: nowrap; }
 .cat-tabs button.on { color: var(--text); border-bottom-color: var(--accent-2); }
 
