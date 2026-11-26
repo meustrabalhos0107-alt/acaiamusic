@@ -178,7 +178,10 @@ async function pushKernel(user, slug, nb, gpu) {
   return { ok: r.code === 0 && /successfully pushed/i.test(r.out), out: r.out };
 }
 
-export function startStudio(onProgress = () => {}, onUpgrade = () => {}) {
+// opts.resume: um pedido já feito antes de o app reiniciar ({ key, topic, since, at, gpu, cpu }):
+//   continua esperando ESSAS máquinas em vez de pedir outras (que recomeçariam a instalação do zero).
+// opts.onPushed(pedido): chamado logo depois de pedir as máquinas, para o app guardar o pedido.
+export function startStudio(onProgress = () => {}, onUpgrade = () => {}, opts = {}) {
   if (starting) {
     starting.listeners.push(onProgress);
     return starting.promise;
@@ -189,24 +192,34 @@ export function startStudio(onProgress = () => {}, onUpgrade = () => {}) {
     listeners.forEach((f) => f(m));
   };
   const promise = (async () => {
-    state = { running: true, phase: "", startedAt: Date.now(), error: "" };
+    const resume = opts.resume;
+    state = { running: true, phase: "", startedAt: resume?.at || Date.now(), error: "" };
     try {
-      const user = await kaggleUser();
-      if (!user) throw new Error("Entre na sua conta do Kaggle neste PC primeiro (peça ao Claude: \"kaggle auth login\").");
-      const key = randomBytes(18).toString("base64url");
-      const topic = "acaia-" + randomBytes(12).toString("hex");
-      const since = Math.floor(Date.now() / 1000) - 5;
-      progress("Pedindo uma máquina grátis ao Kaggle…");
-      const [g, c] = await Promise.all([pushKernel(user, SLUG, notebook(key, topic, false), true), pushKernel(user, SLUG_CPU, notebook(key, topic, true), false)]);
-      if (!g.ok && !c.ok) {
-        const out = c.out || g.out;
-        if (/access_token|api token|401|unauthori[sz]ed|credentials/i.test(out))
-          throw new Error("O token do Kaggle não foi aceito. Gere um novo em kaggle.com/settings → API → Generate New Token (começa com KGAT_) e publique de novo.");
-        throw new Error("O Kaggle recusou: " + out.split("\n").slice(-2).join(" ").slice(0, 300));
+      let key, topic, since, g, c;
+      if (resume) {
+        ({ key, topic, since } = resume);
+        g = { ok: resume.gpu !== false };
+        c = { ok: resume.cpu !== false };
+        progress("Retomando o estúdio que já estava ligando…");
+      } else {
+        const user = await kaggleUser();
+        if (!user) throw new Error("Entre na sua conta do Kaggle neste PC primeiro (peça ao Claude: \"kaggle auth login\").");
+        key = randomBytes(18).toString("base64url");
+        topic = "acaia-" + randomBytes(12).toString("hex");
+        since = Math.floor(Date.now() / 1000) - 5;
+        progress("Pedindo uma máquina grátis ao Kaggle…");
+        [g, c] = await Promise.all([pushKernel(user, SLUG, notebook(key, topic, false), true), pushKernel(user, SLUG_CPU, notebook(key, topic, true), false)]);
+        if (!g.ok && !c.ok) {
+          const out = c.out || g.out;
+          if (/access_token|api token|401|unauthori[sz]ed|credentials/i.test(out))
+            throw new Error("O token do Kaggle não foi aceito. Gere um novo em kaggle.com/settings → API → Generate New Token (começa com KGAT_) e publique de novo.");
+          throw new Error("O Kaggle recusou: " + out.split("\n").slice(-2).join(" ").slice(0, 300));
+        }
+        if (!g.ok) console.log("GPU não pedida:", g.out.split("\n").pop());
+        await opts.onPushed?.({ key, topic, since, at: state.startedAt, gpu: g.ok, cpu: c.ok });
+        progress(g.ok ? "Máquina pedida. Esperando o Kaggle ligar…" : "Máquina pedida (modo processador; a GPU está ocupada no Kaggle)…");
       }
-      if (!g.ok) console.log("GPU não pedida:", g.out.split("\n").pop());
-      progress("Ligando o estúdio. A instalação leva uns 10–15 min…");
-      const t0 = Date.now();
+      const t0 = state.startedAt;
       while (Date.now() - t0 < 50 * 60 * 1000) {
         await new Promise((res) => setTimeout(res, 10000));
         let msgs = [];
@@ -215,6 +228,8 @@ export function startStudio(onProgress = () => {}, onUpgrade = () => {}) {
         } catch {
           continue;
         }
+        // pedido retomado, mas as máquinas já se desligaram: é preciso pedir de novo
+        if (resume && msgs.some((m) => m.message.startsWith("log:fim:"))) throw Object.assign(new Error("O estúdio anterior já desligou."), { restart: true });
         const errs = msgs.filter((m) => m.message.startsWith("log:erro:"));
         if (!c.ok && errs.length) throw new Error(errs[0].message.slice(9));
         if (errs.length >= 2) throw new Error(errs[errs.length - 1].message.slice(9));
@@ -233,7 +248,7 @@ export function startStudio(onProgress = () => {}, onUpgrade = () => {}) {
         }
         const last = msgs.filter((m) => m.message.startsWith("log:") && !m.message.startsWith("log:erro")).pop();
         const mins = Math.floor((Date.now() - t0) / 60000);
-        progress(`${last ? last.message.slice(4) : "Aguardando o Kaggle ligar a máquina…"} (${mins} min)`);
+        progress(`${last ? last.message.slice(4) : "Esperando o Kaggle ligar a máquina (às vezes há fila lá)…"} · ${mins} min`);
       }
       throw new Error("O Kaggle demorou demais para ligar o estúdio.");
     } catch (e) {

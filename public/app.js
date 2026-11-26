@@ -3112,10 +3112,28 @@ async function refreshQueue() {
       if ($("#view-home").classList.contains("active")) renderHome();
     }
     lastPending = q.pending;
-    refreshQueue.t = setTimeout(refreshQueue, $("#queue-dialog").open ? 3000 : q.pending ? 10000 : 30000);
+    refreshQueue.t = setTimeout(refreshQueue, $("#queue-dialog").open ? 2000 : q.pending ? 5000 : 30000);
   } catch {
     refreshQueue.t = setTimeout(refreshQueue, 30000);
   }
+}
+// Etapas da criação de uma música (vêm do status do trabalho no servidor)
+const Q_STAGES = [
+  { keys: ["waiting", "connecting"], label: "Ligando o estúdio" },
+  { keys: ["queued"], label: "Na fila do estúdio" },
+  { keys: ["generating"], label: "Compondo e gravando" },
+  { keys: ["saving"], label: "Salvando" },
+];
+const qStage = (status) => Math.max(0, Q_STAGES.findIndex((s) => s.keys.includes(status)));
+const mmss = (ms) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s >= 3600 ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+function stagesHtml(it) {
+  const cur = qStage(it.status);
+  return `<ol class="qd-steps">${Q_STAGES.map(
+    (s, k) => `<li class="${k < cur ? "ok" : k === cur ? "now" : ""}"><i>${k < cur ? "✓" : k + 1}</i><span>${s.label}${k === cur && it.stageAt ? ` · ${mmss(Date.now() - it.stageAt)}` : ""}</span></li>`,
+  ).join("")}</ol>`;
 }
 const Q_ICON = { done: "✅", error: "⚠️", canceled: "🚫" };
 const Q_WORD = { done: "Pronta", error: "Não deu certo", canceled: "Cancelada" };
@@ -3126,7 +3144,11 @@ function renderQueue(q) {
   if (q.pending) {
     $("#queue-text").textContent = q.paused
       ? `⏸ Fila pausada · ${q.pending} música${q.pending > 1 ? "s" : ""}${q.current ? " (terminando a atual)" : ""}`
-      : `🎵 Criando ${q.pending} música${q.pending > 1 ? "s" : ""}${q.current ? ` · ${q.current.label}` : ""}`;
+      : (() => {
+          const run = q.items?.find((i) => i.running);
+          const st = run ? `${Q_STAGES[qStage(run.status)].label}${run.stageAt ? " " + mmss(Date.now() - run.stageAt) : ""}` : "";
+          return `🎵 ${q.pending > 1 ? `${q.pending} músicas · ` : ""}${st || "Na fila"}${q.current ? ` · ${q.current.label}` : ""}`;
+        })();
     pill.title = `${q.current?.message || "Na fila"}\nToque para pausar, cancelar ou ver a fila.`;
   }
   const pb = $("#qd-pause");
@@ -3140,7 +3162,7 @@ function renderQueue(q) {
           const tries = it.tries > 1 || it.retryAt ? ` · tentativa ${Math.min(it.tries + (it.running ? 0 : 1), it.maxTries)} de ${it.maxTries}` : "";
           return `<li class="${it.running ? "run" : ""}" data-id="${esc(it.id)}">
             <span>${it.running ? "🎙️" : k + 1 + "."}</span>
-            <div class="qd-info"><b>${esc(it.label)}</b><small>${esc(it.message)}${esc(wait)}${esc(tries)}</small></div>
+            <div class="qd-info"><b>${esc(it.label)}</b>${it.running ? stagesHtml(it) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
             <div class="qd-act">
               ${!it.running && (it.retryAt || k > 0) ? `<button class="btn ghost" data-q="now" title="Passar para a frente e tentar já">Agora</button>` : ""}
               <button class="btn ghost" data-q="cancel">Cancelar</button>

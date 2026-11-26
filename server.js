@@ -34,11 +34,25 @@ kaggleUser().then((u) => {
 async function ensureStudio(onProgress) {
   if (kaggleConfigured() && (await kaggleHealth()).ok) return true;
   if (!KAGGLE_USER) return false;
-  const { url, key, topic, cpu } = await startStudio(onProgress, async ({ url: gpuUrl }) => {
+  const onUpgrade = async ({ url: gpuUrl }) => {
     console.log("Estúdio: a GPU ligou, trocando para ela:", gpuUrl);
     await saveSettings({ kaggleUrl: gpuUrl, kaggleCpu: false });
-  });
-  await saveSettings({ kaggleUrl: url, kaggleKey: key, kaggleTopic: topic, kaggleCpu: cpu, studioSince: Date.now() });
+  };
+  // Pedido feito antes de o app reiniciar (o Render grátis reinicia às vezes): continua esperando
+  // as mesmas máquinas, em vez de pedir outras e recomeçar a instalação do zero.
+  const pending = getSettings().pendingStudio;
+  const fresh = pending && Date.now() - pending.at < 45 * 60 * 1000 ? pending : null;
+  const opts = { onPushed: (p) => saveSettings({ pendingStudio: p }) };
+  let r;
+  try {
+    r = await startStudio(onProgress, onUpgrade, fresh ? { ...opts, resume: fresh } : opts);
+  } catch (e) {
+    await saveSettings({ pendingStudio: null });
+    if (!e.restart) throw e;
+    r = await startStudio(onProgress, onUpgrade, opts); // o anterior já tinha desligado: pede de novo
+  }
+  const { url, key, topic, cpu } = r;
+  await saveSettings({ kaggleUrl: url, kaggleKey: key, kaggleTopic: topic, kaggleCpu: cpu, studioSince: Date.now(), pendingStudio: null });
   for (let i = 0; i < 12; i++) {
     if ((await kaggleHealth()).ok) return true; // o túnel pode levar alguns segundos para responder
     await new Promise((r) => setTimeout(r, 5000));
@@ -299,11 +313,14 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
   const startedAt = Date.now();
   let engine = "Hugging Face (gratuito)";
   const job = jobs.get(id);
+  // guarda quando cada etapa começou (para mostrar "Ligando o estúdio · 3 min", etc.)
+  const stamp = (patch) => (patch.status && patch.status !== job.status ? { ...patch, stageAt: Date.now() } : patch);
   const set = (patch) => {
     if (job.canceled) throw new Error("CANCELED");
-    Object.assign(job, patch, { updatedAt: Date.now() });
+    Object.assign(job, stamp(patch), { updatedAt: Date.now() });
   };
-  const softSet = (patch) => !job.canceled && Object.assign(job, patch, { updatedAt: Date.now() }); // não interrompe a ligação do estúdio
+  const softSet = (patch) => !job.canceled && Object.assign(job, stamp(patch), { updatedAt: Date.now() }); // não interrompe a ligação do estúdio
+  job.startedAt = startedAt;
   try {
     set({ status: "connecting", message: "Conectando ao estúdio de IA…" });
     const seconds = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, duration));
@@ -333,6 +350,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
         try {
           raw = await generateKaggle({ params, options, language, reference }, set);
           engine = "Seu estúdio no Kaggle";
+          lastStudioUse = Date.now();
         } catch (e) {
           if (job.canceled) throw e;
           console.log("Kaggle falhou, indo para os estúdios gratuitos:", e?.message);
@@ -521,6 +539,9 @@ const queueView = () => {
         id: q.id,
         label: q.label || q.input?.plan?.title || "Música",
         running,
+        status: running ? j.status || "connecting" : "queued",
+        startedAt: running ? j.startedAt || 0 : 0,
+        stageAt: running ? j.stageAt || j.startedAt || 0 : 0,
         message: running ? j.message || "Criando…" : q.notBefore > Date.now() ? j.message || "Aguardando nova tentativa…" : paused ? "Pausada" : "Na fila",
         tries: q.tries,
         maxTries: MAX_TRIES,
@@ -909,7 +930,7 @@ app.post("/api/studio/start", (_req, res) => {
 });
 app.post("/api/studio/stop", async (_req, res) => {
   await stopStudio(getSettings().kaggleTopic);
-  await saveSettings({ kaggleUrl: "", kaggleKey: "", kaggleTopic: "" });
+  await saveSettings({ kaggleUrl: "", kaggleKey: "", kaggleTopic: "", pendingStudio: null });
   res.json({ ok: true });
 });
 
@@ -944,6 +965,22 @@ app.post("/api/settings", async (req, res) => {
   await saveSettings({ [U]: url, [K]: key });
   res.json({ ok: true });
 });
+
+// ---------- Manter acordado ----------
+// O Render grátis "dorme" depois de ~15 min sem visitas, mesmo com músicas na fila: o trabalho
+// parava no meio e o estúdio do Kaggle ficava ligado sem ninguém usar. Enquanto houver trabalho
+// (ou o estúdio estiver ligado e pronto para a próxima música), o app visita a si mesmo.
+let lastStudioUse = 0;
+const SELF_URL = (process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
+const hasWork = () =>
+  queue.length > 0 ||
+  autoState().running ||
+  Date.now() - lastStudioUse < 35 * 60 * 1000 ||
+  [...jobs.values()].some((j) => !["done", "error", "canceled"].includes(j.status) && Date.now() - (j.updatedAt || j.createdAt) < 20 * 60 * 1000);
+if (SELF_URL)
+  setInterval(() => {
+    if (hasWork()) fetch(SELF_URL + "/manifest.json", { signal: AbortSignal.timeout(20000) }).catch(() => {});
+  }, 4 * 60 * 1000).unref();
 
 // Limpa trabalhos antigos da memória
 setInterval(() => {

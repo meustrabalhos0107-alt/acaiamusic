@@ -987,3 +987,10 @@ details.manual summary { cursor: pointer; color: var(--muted); font-size: 0.8rem
 .qd-sub { margin: 18px 0 0; font-size: 0.85rem; color: var(--muted); }
 .qd-hist li { opacity: 0.85; }
 .qd-empty { color: var(--muted); font-size: 0.85rem; }
+.qd-steps { list-style: none; margin: 8px 0 6px; padding: 0; display: grid; gap: 4px; }
+.qd-steps li { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: var(--muted); }
+.qd-steps i { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font-style: normal; font-size: 0.66rem; font-weight: 800; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line-2, #31314a); }
+.qd-steps li.ok { color: #86efac; }
+.qd-steps li.ok i { background: rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 0.5); }
+.qd-steps li.now { color: #fff; font-weight: 700; }
+.qd-steps li.now i { background: #ec4899; border-color: #f472b6; box-shadow: 0 0 10px #f472b6; animation: qp 1.4s ease-in-out infinite; }

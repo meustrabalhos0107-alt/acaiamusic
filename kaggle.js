@@ -128,7 +128,9 @@ export async function generateKaggle({ params, options, language, reference }, s
     const item = Array.isArray(q?.data) ? q.data.find((d) => d.task_id === taskId) || q.data[0] : null;
     if (!item) continue;
     if (item.status === 0) {
-      set({ status: "generating", message: `Compondo e gravando no seu estúdio (${where})…` });
+      const secs = Math.round((Date.now() - t0) / 1000);
+      const slow = server !== "modal" && settings.kaggleCpu ? " · modo processador, mais lento" : "";
+      set({ status: "generating", message: `Compondo e gravando no seu estúdio (${where}${slow})… ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` });
       continue;
     }
     if (item.status === 2) throw new Error(`O estúdio do ${where} não conseguiu gerar: ` + String(item.result || item.error || "erro").slice(0, 200));
