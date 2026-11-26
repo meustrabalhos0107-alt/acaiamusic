@@ -264,7 +264,9 @@ const PROVIDERS = [
     name: "Gemini",
     url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     token: (process.env.GEMINI_API_KEY || "").trim(),
-    models: list(process.env.GEMINI_MODELS, "gemini-2.5-flash,gemini-2.0-flash"),
+    // os "flash" escrevem melhor; o "flash-lite" é rápido e quase nunca está lotado (reserva)
+    models: list(process.env.GEMINI_MODELS, "gemini-flash-latest,gemini-3.8-flash,gemini-flash-lite-latest,gemini-3.5-flash"),
+    extra: { reasoning_effort: "low", max_tokens: 8000 }, // pensa o suficiente, sem demorar
     offUntil: 0,
   },
   {
@@ -276,9 +278,14 @@ const PROVIDERS = [
   },
 ];
 
+// modelo lotado (503/429) ou lento: fica de lado por 10 min e vai direto para o próximo
+const modelRest = new Map();
+const restModel = (model) => modelRest.set(model, Date.now() + 10 * 60 * 1000);
+
 async function callProvider(p, system, user) {
   if (!p.token || Date.now() < p.offUntil) return null;
   for (const model of p.models) {
+    if ((modelRest.get(model) || 0) > Date.now()) continue;
     try {
       const r = await fetch(p.url, {
         method: "POST",
@@ -292,8 +299,9 @@ async function callProvider(p, system, user) {
           response_format: { type: "json_object" },
           temperature: 0.8,
           max_tokens: 2500,
+          ...(p.extra || {}),
         }),
-        signal: AbortSignal.timeout(90000),
+        signal: AbortSignal.timeout(45000), // lotado ou lento: passa logo para o próximo modelo
       });
       // chave sem permissão ou sem créditos: deixa de lado por 6 h e usa o próximo compositor
       if ([401, 402, 403].includes(r.status)) {
@@ -302,12 +310,14 @@ async function callProvider(p, system, user) {
         return null;
       }
       if (!r.ok) {
+        if ([429, 500, 503, 504].includes(r.status)) restModel(model);
         console.log(`Compositor ${p.name} ${model}: ${r.status}`);
         continue;
       }
       const data = await r.json();
       return extractJson(data.choices?.[0]?.message?.content || "");
     } catch (e) {
+      if (/timeout|abort/i.test(e.message)) restModel(model);
       console.log(`Compositor ${p.name} ${model} falhou:`, e.message);
     }
   }
