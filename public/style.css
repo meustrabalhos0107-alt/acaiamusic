@@ -1174,3 +1174,5 @@ dialog { max-width: calc(100vw - 16px); }
 .qd-info b { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .qd-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .qd-tag { flex: none; margin-left: 0; }
+.session-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
+.session-actions small { flex: 1 1 220px; font-size: 0.75rem; }

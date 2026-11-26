@@ -584,7 +584,7 @@ Letra: ${lyric}`;
   try {
     // a IA de texto às vezes está lotada: no máximo 20 s; depois, uma cena montada pelo momento e pelo tema
     const raw = await Promise.race([callLLM(system, user), new Promise((_, rej) => setTimeout(() => rej(new Error("demorou")), 20000))]);
-    p = String(raw?.prompt || "").replace(/s+/g, " ").trim().slice(0, 600);
+    p = String(raw?.prompt || "").replace(/\s+/g, " ").trim().slice(0, 600);
   } catch {}
   if (p.length < 20) p = fallbackScene({ title, sections, mode, moment });
   return `${p}${pal ? `, ${pal.en}` : ""}, high quality illustration, no text`;

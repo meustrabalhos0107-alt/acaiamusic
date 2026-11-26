@@ -856,6 +856,12 @@ $("#btn-song").onclick = async () => {
   }
   const duration = Number($("#duration").value);
 
+  let minimized = false; // a pessoa fechou a janela: segue em segundo plano e só avisa no fim
+  $("#session-hide").onclick = () => {
+    minimized = true;
+    $("#session").classList.add("hidden");
+    toast("🎵 A música continua sendo criada. Acompanhe pela fila, no alto da tela.", false, 5000);
+  };
   $("#session").classList.remove("hidden");
   $("#progress-title").textContent = title;
   sessionProgress(3);
@@ -878,7 +884,12 @@ $("#btn-song").onclick = async () => {
     let pct = 3;
     for (;;) {
       await sleep(2000);
-      const job = await api(`/api/jobs/${jobId}`);
+      let job = await api(`/api/jobs/${jobId}`);
+      // erro de uma tentativa: a fila tenta de novo sozinha; só desiste se continuar em erro
+      if (job.status === "error") {
+        await sleep(4000);
+        job = await api(`/api/jobs/${jobId}`);
+      }
       if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
       $("#progress-text").textContent = job.message || "Trabalhando…";
       const target = PHASES[job.status] ?? pct;
@@ -887,10 +898,15 @@ $("#btn-song").onclick = async () => {
       if (job.status === "done") {
         state.songs.unshift(job.song);
         updateCount();
-        toast("🎉 Sua música está pronta!");
-        showView("library");
-        play(job.song);
-        openSong(job.song);
+        if (minimized) {
+          toast(`🎉 “${job.song.title}” está pronta! Veja na Biblioteca.`, false, 9000);
+          if ($("#view-library").classList.contains("active")) renderLibrary();
+        } else {
+          toast("🎉 Sua música está pronta!");
+          showView("library");
+          play(job.song);
+          openSong(job.song);
+        }
         break;
       }
     }
@@ -901,6 +917,8 @@ $("#btn-song").onclick = async () => {
     $("#session").classList.add("hidden");
   }
 };
+// Esc também fecha a janela de gravação (a música continua em segundo plano)
+document.addEventListener("keydown", (e) => e.key === "Escape" && !$("#session").classList.contains("hidden") && $("#session-hide").click());
 
 // =========================================================
 // NAVEGAÇÃO / BIBLIOTECA
