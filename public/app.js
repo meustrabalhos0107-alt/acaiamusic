@@ -1388,6 +1388,40 @@ async function albumsForSong(song) {
   });
 }
 
+// ---------------- Refazer com revisão de pronúncia ----------------
+// Grava a música de novo do mesmo jeito; o Whisper ouve e, se a letra não estiver clara, o estúdio
+// grava outra (até 3) e fica a melhor. A nova gravação substitui a antiga no mesmo lugar.
+async function redoSong(song) {
+  if (!confirm(`Refazer “${song.title}” do mesmo jeito (mesma letra, estilo e vozes)?\n\nO Whisper confere se dá para entender a letra; se não der, o estúdio grava de novo (até 3 vezes) e fica a gravação mais clara. A nova substitui a atual.`)) return;
+  let r;
+  try {
+    r = await api(`/api/songs/${song.id}/redo`, { method: "POST", body: JSON.stringify({ check: true }) });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  toast(r.check ? "🎯 Refazendo com revisão de pronúncia. Acompanhe na fila de criação." : "Refazendo (a revisão de pronúncia precisa do estúdio no Modal).", false, 6000);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 3 * 60 * 60 * 1000) {
+    await sleep(5000);
+    let j;
+    try {
+      j = await api(`/api/jobs/${r.jobId}`);
+    } catch {
+      continue;
+    }
+    if (j.status === "canceled") return;
+    if (j.status !== "done" || !j.song) continue; // erros voltam para a fila e são tentados de novo
+    const k = state.songs.findIndex((s) => s.id === j.song.id);
+    if (k >= 0) state.songs[k] = j.song;
+    else state.songs.unshift(j.song);
+    updateCount();
+    if ($("#view-library").classList.contains("active")) renderLibrary();
+    if ($("#song-dialog").open && dlgSong?.id === j.song.id) openSong(j.song);
+    toast(`🎯 “${j.song.title}” refeita. ${j.message.replace(/^Pronta! ?/, "")}`, false, 9000);
+    return;
+  }
+}
+
 // ---------------- Repertório da Missa ----------------
 const MASS_ORDER = [
   "Entrada", "Ato Penitencial (Kyrie)", "Glória", "Salmo Responsorial", "Aclamação ao Evangelho",
@@ -1900,6 +1934,7 @@ function openSong(song) {
   renderVersions(song);
   $("#dlg-fav").onclick = () => toggleFav(song);
   $("#dlg-album").onclick = () => albumsForSong(song);
+  $("#dlg-redo").onclick = () => redoSong(song);
   $("#dlg-reuse").onclick = () => {
     if (song.options) applySpec(song);
     state.lastOptions = song.options || null;
@@ -2140,6 +2175,8 @@ function specGroups(song) {
       ["Letra", LYRICS_SOURCE[sp.lyricsSource] || "—"],
       ["Servidor", sp.engine],
       ["Tempo de criação", sp.generationSeconds ? fmt(sp.generationSeconds) : null],
+      ["Pronúncia (Whisper)", sp.pronunciation != null ? `${sp.pronunciation}% da letra entendida${sp.takes > 1 ? ` · melhor de ${sp.takes} gravações` : ""}` : null],
+      ["Refeita em", song.remadeAt ? new Date(song.remadeAt).toLocaleString("pt-BR", { dateStyle: "long", timeStyle: "short" }) : null],
       ["Edição", song.edit?.changes?.length ? song.edit.changes.join(", ") : null],
     ]],
   ];
@@ -2442,7 +2479,7 @@ function renderChords() {
   $("#tr-key").textContent = currentKey();
   const prog = song.chords.progression ? song.chords.progression.split(/\s*[–-]\s*/).map((c) => trChord(c, sh)).join(" – ") : "";
   $("#chord-sheet").innerHTML =
-    `<div class="prog">Tom: ${esc(currentKey())}${capoNote() ? ` · <b>${esc(capoNote())}</b>` : ""}${prog ? ` · Progressão: ${esc(prog)}` : ""}</div>` +
+    `<div class="prog">${song.chords.source === "audio" ? "🎧 Tirada do áudio · " : ""}Tom: ${esc(currentKey())}${capoNote() ? ` · <b>${esc(capoNote())}</b>` : ""}${prog ? ` · Progressão: ${esc(prog)}` : ""}</div>` +
     chordSheet(song, sh, true);
   // desenhos dos acordes usados, na ordem em que aparecem
   const used = [];
@@ -2501,7 +2538,7 @@ $("#song-dialog").addEventListener("close", stopMetro);
 $("#btn-chords").onclick = async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
-  btn.textContent = "🎸 Harmonizando…";
+  btn.textContent = "🎧 Ouvindo a música… (1 a 3 min)";
   try {
     dlgSong.chords = await api(`/api/songs/${dlgSong.id}/chords`, { method: "POST", body: JSON.stringify({ key: $("#chord-key").value }) });
     transposeBy = 0;

@@ -92,3 +92,4 @@ def separar(item: dict):
         )
         out = pathlib.Path(d, "htdemucs", "musica")
         return {n: base64.b64encode((out / f"{n}.mp3").read_bytes()).decode() for n in ["vocals", "bass", "drums", "other"]}
+

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client, handle_file } from "@gradio/client";
 import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, refineLyrics, sanitizeChords, writeLyrics } from "./lyrics.js";
 import { masterOrPlain } from "./audio.js";
+import { chordSheetFromAudio, hearingUrl, lyricScore, listen } from "./hearing.js";
 import { registerStudio } from "./studio.js";
 import { initSettings, getSettings, saveSettings, kaggleHealth, kaggleConfigured, generateKaggle, modalConfigured, modalStatus, wakeModal } from "./kaggle.js";
 import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio, requestGpu } from "./kaggle-auto.js";
@@ -364,7 +365,7 @@ async function generateOn15Spaces({ params, options, language, reference }, set)
   throw lastErr || new Error("runs limit: todos os estúdios gratuitos estão no limite agora");
 }
 
-async function runJob(id, { plan, duration, language, meta, options, reference, spec = {} }) {
+async function runJob(id, { plan, duration, language, meta, options, reference, spec = {}, check = false, replaceId = null }) {
   const startedAt = Date.now();
   // Pedidos antigos da fila guardaram 40 BPM por engano (andamento "auto" virava 40): descarta
   if (options.bpm === 40 && (options.tempo || "auto") === "auto") options = { ...options, bpm: 0 };
@@ -489,6 +490,42 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     if (!raw && !hfTried) raw = await tryHF();
     if (job.canceled) throw new Error("CANCELED");
     if (!raw) throw hfErr || new Error("runs limit: todos os estúdios gratuitos estão no limite agora");
+    let pron = null;
+    if (check && sung && hearingUrl()) {
+      const TAKES = 3, GOOD = 96;
+      let best = null;
+      for (let take = 1; take <= TAKES; take++) {
+        set({ status: "generating", message: `Conferindo a pronúncia com o Whisper (versão ${take} de até ${TAKES})…` });
+        let heard = null;
+        try {
+          const beat = setInterval(() => softSet({}), 60000); // sinal de vida para o vigia da fila
+          try {
+            heard = await listen(Array.isArray(raw) ? raw[0] : raw, language);
+          } finally {
+            clearInterval(beat);
+          }
+        } catch (e) {
+          if (job.canceled || job.attempt !== attempt) throw e;
+          console.log("Whisper não conseguiu ouvir:", e.message);
+          if (!best) best = { raw, score: null, heard: null, take };
+          break;
+        }
+        const score = lyricScore(sung, heard.text);
+        console.log(`Pronúncia "${plan.title}" versão ${take}: ${score}%`);
+        if (!best || score > (best.score ?? -1)) best = { raw, score, heard, take };
+        if (score >= GOOD || take === TAKES || !modalConfigured()) break;
+        set({ status: "generating", message: `Versão ${take}: ${score}% da letra entendida. Gravando outra mais clara (${take + 1} de ${TAKES})…` });
+        try {
+          raw = await generateKaggle({ params, options, language, reference }, set, "modal");
+        } catch (e) {
+          if (job.canceled || job.attempt !== attempt) throw e;
+          console.log("Nova versão para a pronúncia falhou:", e.message);
+          break;
+        }
+      }
+      raw = best.raw;
+      pron = { score: best.score, take: best.take, heard: best.heard };
+    }
     set({ status: "saving", message: "Masterizando (volume e brilho de streaming)…" });
     // ffmpeg num processo à parte: converter/masterizar aqui dentro travava o servidor grátis
     // (o Render achava que o app tinha morrido e o reiniciava sem parar)
@@ -496,36 +533,56 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     const [mainRaw, altRaw] = Array.isArray(raw) ? raw : [raw];
     const { mp3, seconds: realSeconds, mastered } = await masterOrPlain(mainRaw);
     if (job.canceled) throw new Error("CANCELED");
-    await fs.writeFile(path.join(SONGS_DIR, `${id}.mp3`), mp3);
+    set({ status: "saving", message: "Salvando…" });
+    // "Refazer": a música nova fica no lugar da antiga (mesmo id: álbuns e repertórios continuam valendo)
+    const old = replaceId ? (await loadSongs()).find((x) => x.id === replaceId) : null;
+    const outId = old ? old.id : id;
+    const rev = Date.now();
+    await fs.writeFile(path.join(SONGS_DIR, `${outId}.mp3`), mp3);
+    if (old) {
+      await fs.rm(path.join(SONGS_DIR, `${outId}-v2.mp3`), { force: true });
+      await fs.rm(studio.mediaDir(outId), { recursive: true, force: true }); // faixas e vídeos da gravação antiga
+    }
     let alt = null;
     if (altRaw) {
       set({ status: "saving", message: "Masterizando a 2ª versão…" });
       try {
         const a = await masterOrPlain(altRaw);
-        await fs.writeFile(path.join(SONGS_DIR, `${id}-v2.mp3`), a.mp3);
-        alt = { url: `/audio/${id}-v2.mp3`, duration: Math.round(a.seconds || 0) };
+        await fs.writeFile(path.join(SONGS_DIR, `${outId}-v2.mp3`), a.mp3);
+        alt = { url: `/audio/${outId}-v2.mp3${old ? `?v=${rev}` : ""}`, duration: Math.round(a.seconds || 0) };
       } catch (e) {
         console.log("2ª versão não foi salva:", e.message);
       }
     }
 
+    // cifra tirada do áudio, quando o Whisper ouviu a música
+    let audioChords = null;
+    if (pron?.heard) {
+      try {
+        audioChords = chordSheetFromAudio(order, pron.heard);
+      } catch (e) {
+        console.log("Cifra do áudio falhou:", e.message);
+      }
+    }
     const song = {
-      id,
+      id: outId,
       title: plan.title,
       styles: plan.styles,
       sections: plan.sections,
       references: plan.references,
       notes: plan.notes,
-      ...(plan.chords ? { chords: plan.chords } : {}),
+      ...(audioChords ? { chords: audioChords } : plan.chords && !old ? { chords: plan.chords } : {}),
+      ...(pron?.heard ? { hearing: { words: pron.heard.words, chords: pron.heard.chords, key: pron.heard.key, tempo: pron.heard.tempo } } : {}),
       ...(reference ? { reference: String(reference.name || "").slice(0, 120) } : {}),
       genre: options.genre,
       mood: options.moods.join(", "),
       voice: options.voice,
       options,
-      cover: Number.isInteger(meta.cover) ? meta.cover : Math.floor(Math.random() * 1e6),
-      favorite: false,
+      cover: old ? old.cover : Number.isInteger(meta.cover) ? meta.cover : Math.floor(Math.random() * 1e6),
+      favorite: old ? Boolean(old.favorite) : false,
       duration: Math.round(realSeconds || seconds),
-      createdAt: new Date().toISOString(),
+      createdAt: old ? old.createdAt : new Date().toISOString(),
+      ...(old ? { remadeAt: new Date().toISOString() } : {}),
       // Ficha técnica: tudo o que foi escolhido para criar esta música
       spec: {
         idea: String(spec.idea || "").slice(0, 1500),
@@ -537,12 +594,14 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
         musicPrompt: params.prompt,
         mastered: Boolean(mastered),
         generationSeconds: Math.round((Date.now() - startedAt) / 1000),
+        ...(pron && pron.score != null ? { pronunciation: pron.score, takes: pron.take } : {}),
       },
-      url: `/audio/${id}.mp3`,
+      url: `/audio/${outId}.mp3${old ? `?v=${rev}` : ""}`,
       ...(alt ? { alt } : {}),
     };
-    await updateSongs((songs) => [song, ...songs]);
-    set({ status: "done", message: "Pronta!", song });
+    if (job.attempt !== attempt) throw new Error("SUPERSEDED");
+    await updateSongs((songs) => (old && songs.some((x) => x.id === outId) ? songs.map((x) => (x.id === outId ? song : x)) : [song, ...songs]));
+    set({ status: "done", message: pron?.score != null ? `Pronta! Pronúncia: ${pron.score}% da letra entendida.` : "Pronta!", song });
   } catch (e) {
     if (job.canceled) return setCanceled(job);
     if (job.attempt !== attempt) return console.log("Tentativa antiga encerrada:", e?.message || e);
@@ -758,6 +817,30 @@ app.post("/api/songs", (req, res) => {
   };
   enqueueSong(id, input, { label: plan.title });
   res.json({ jobId: id });
+});
+
+// Refazer a música do mesmo jeito (letra, estilo, vozes), com revisão de pronúncia pelo Whisper.
+// A nova gravação substitui a antiga no mesmo lugar.
+app.post("/api/songs/:id/redo", async (req, res) => {
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  if (!song.options || !song.sections) return res.status(400).json({ error: "Esta música é antiga e não guardou como foi feita. Use ✎ Nova versão." });
+  if (queue.some((q) => q.input?.replaceId === song.id)) return res.status(409).json({ error: "Esta música já está sendo refeita." });
+  const check = req.body?.check !== false && Boolean(hearingUrl());
+  const input = {
+    plan: { title: song.title, styles: song.styles || [], sections: song.sections, references: song.references || [], notes: song.notes || "" },
+    duration: Number(song.spec?.requestedDuration) || song.duration || 120,
+    language: song.spec?.language || "pt",
+    meta: { cover: song.cover },
+    options: cleanOptions(song.options), // normaliza opções de músicas antigas
+    reference: null,
+    spec: { idea: song.spec?.idea, lyricsSource: song.spec?.lyricsSource },
+    check,
+    replaceId: song.id,
+  };
+  const id = randomUUID();
+  enqueueSong(id, input, { label: `${song.title} (refazendo${check ? " com revisão de pronúncia" : ""})` });
+  res.json({ jobId: id, check });
 });
 
 app.get("/api/jobs/:id", (req, res) => {
@@ -1123,7 +1206,21 @@ app.post("/api/songs/:id/chords", async (req, res) => {
   if (!song.sections?.some((s) => s.lines.length)) return res.status(400).json({ error: "Música instrumental não tem letra para cifrar." });
   try {
     const key = String(req.body?.key || song.options?.key || "").slice(0, 10);
-    const chords = await generateChords({ sections: song.sections, key, mode: song.options?.mode, genre: song.genre });
+    let chords = null;
+    if (hearingUrl() && req.body?.source !== "ia") {
+      try {
+        let heard = song.hearing;
+        if (!heard?.words?.length) {
+          heard = await listen(await fs.readFile(path.join(SONGS_DIR, `${song.id}.mp3`)), song.spec?.language || "pt");
+          heard = { words: heard.words, chords: heard.chords, key: heard.key, tempo: heard.tempo };
+          await updateSongs((songs) => songs.map((s) => (s.id === song.id ? { ...s, hearing: heard } : s)));
+        }
+        chords = chordSheetFromAudio(sungOrder(song.sections), heard);
+      } catch (e) {
+        console.log("Cifra pelo áudio não deu, usando a IA:", e.message);
+      }
+    }
+    chords ||= await generateChords({ sections: song.sections, key, mode: song.options?.mode, genre: song.genre });
     await updateSongs((songs) => songs.map((s) => (s.id === song.id ? { ...s, chords } : s)));
     res.json(chords);
   } catch (e) {
