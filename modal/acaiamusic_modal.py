@@ -35,7 +35,7 @@ models = modal.Volume.from_name("acaiamusic-modelos", create_if_missing=True)
     gpu="L4",  # GPU nova (bfloat16): na T4 o ACE-Step 1.5 gera NaN (som vazio) em músicas longas
     volumes={"/models": models},
     secrets=[modal.Secret.from_name("acaiamusic")],
-    scaledown_window=120,  # desliga sozinho 2 min depois da última música
+    scaledown_window=300,  # desliga sozinho 5 min depois da última música (a próxima não recarrega os modelos)
     max_containers=1,  # nunca liga mais de uma GPU
     timeout=60 * 60,
 )

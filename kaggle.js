@@ -92,9 +92,9 @@ export async function generateKaggle({ params, options, language, reference }, s
   Object.assign(fields, lm
     ? { thinking: true, use_cot_caption: false, use_cot_language: false, lm_temperature: 0.85, lm_cfg_scale: 2.5 }
     : { thinking: false, use_cot_caption: false, use_cot_language: false });
-  // Com GPU, grava 2 versões de uma vez (quase o mesmo tempo): a pessoa escolhe a melhor.
-  // No modo processador seria o dobro do tempo, então fica 1.
-  if (lm) fields.batch_size = 2;
+  // Na GPU grátis do Kaggle grava 2 versões para a pessoa escolher. No Modal (crédito por
+  // minuto) fica 1: o planejador compõe uma versão de cada vez e a 2ª quase dobrava a espera.
+  if (lm && server !== "modal") fields.batch_size = 2;
   try {
     return await submitAndWait({ fields, url, key, where, server, reference }, set);
   } catch (e) {
