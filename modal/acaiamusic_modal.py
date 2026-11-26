@@ -25,7 +25,7 @@ image = (
         "cd /app && UV_LINK_MODE=copy uv sync --no-dev",
         # Os modelos (~10 GB) ficam DENTRO da imagem: a máquina liga com tudo pronto, sem baixar
         # nada (no volume eles se perdiam quando o estúdio era republicado e baixavam de novo).
-        "cd /app && uv run python -c \"from huggingface_hub import snapshot_download; snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/ckpt')\"",
+        "cd /app && uv run python -c \"from huggingface_hub import snapshot_download; snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/app/checkpoints')\"",
     )
 )
 
@@ -49,7 +49,7 @@ def estudio():
         ACESTEP_INIT_LLM="true",  # planejador musical (5Hz LM): som mais humano e natural
         ACESTEP_LM_MODEL_PATH="acestep-5Hz-lm-1.7B",
         ACESTEP_LM_BACKEND="pt",
-        ACESTEP_CHECKPOINTS_DIR="/ckpt",
+        ACESTEP_CHECKPOINTS_DIR="/app/checkpoints",  # é aqui que o estúdio procura (ignora outras pastas)
         ACESTEP_GENERATION_TIMEOUT="3600",
         ACESTEP_NO_INIT="false",  # carrega os modelos ao ligar (o pré-aquecimento já deixa tudo pronto)
     )
