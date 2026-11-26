@@ -1155,3 +1155,9 @@ dialog { max-width: calc(100vw - 16px); }
   #song-dialog .dlg-actions > * { padding: 9px 6px; font-size: 0.82rem; }
   #song-dialog #dlg-play { grid-column: 1 / -1; }
 }
+
+/* Capa ilustrada (imagem do tema da música) */
+.cover img.art, .alb-cover img.art, #pj-bg img.art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.alb-mosaic img.art { position: relative; }
+.cover.pic { background: #120d1b; }
+.cover.pic::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); pointer-events: none; }

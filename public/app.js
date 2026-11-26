@@ -89,7 +89,11 @@ function coverArt(seed, size = "") {
   return `<svg xmlns="http://www.w3.org/2000/svg" class="art" viewBox="0 0 100 100" ${size} preserveAspectRatio="xMidYMid slice"><defs><filter id="${id}b" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="${style === 0 ? 9 : 0.4}"/></filter><radialGradient id="${id}l" cx="25%" cy="20%" r="80%"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs><rect width="100" height="100" fill="${bg}"/><g filter="url(#${id}b)">${shapes}</g><rect width="100" height="100" fill="url(#${id}l)"/></svg>`;
 }
 const coverHtml = (song, size, extra = "") =>
-  `<div class="cover ${size}" ${extra}>${coverArt(song.cover ?? 1)}<span>${esc(initials(song.title))}</span></div>`;
+  song.illustration?.url
+    ? `<div class="cover ${size} pic" ${extra}><img class="art" src="${esc(song.illustration.url)}" alt="" loading="lazy" decoding="async" /></div>` // capa com a imagem do tema
+    : `<div class="cover ${size}" ${extra}>${coverArt(song.cover ?? 1)}<span>${esc(initials(song.title))}</span></div>`;
+// imagem de capa de uma música (a ilustrada, se houver) — para mosaicos e fundos
+const coverImg = (s) => (s.illustration?.url ? `<img class="art" src="${esc(s.illustration.url)}" alt="" loading="lazy" />` : coverArt(s.cover ?? 1));
 
 // =========================================================
 // CATÁLOGOS
@@ -904,7 +908,7 @@ $("#btn-song").onclick = async () => {
 function showView(name) {
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + name));
   $$(".rail-nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
-  if (name === "library") renderLibrary();
+  if (name === "library") (renderLibrary(), loadSongs().then(() => state.libMode === "songs" && $("#view-library").classList.contains("active") && renderLibrary())); // capas novas feitas em segundo plano
   if (name === "home") renderHome();
   if (name === "setlists") renderSetlists();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1167,8 +1171,8 @@ const fmtLong = (sec) => (sec >= 3600 ? `${Math.floor(sec / 3600)} h ${Math.roun
 function albumCover(a, size = "") {
   const ss = albumSongs(a).slice(0, 4);
   const inner = ss.length >= 4
-    ? `<div class="alb-mosaic">${ss.map((s) => coverArt(s.cover ?? 1)).join("")}</div>`
-    : ss.length ? coverArt(ss[0].cover ?? 1) : "";
+    ? `<div class="alb-mosaic">${ss.map((s) => coverImg(s)).join("")}</div>`
+    : ss.length ? coverImg(ss[0]) : "";
   return `<div class="alb-cover ${size}" style="--alb:${a.color || ALBUM_COLORS[0]}">${inner}<span class="alb-disc">${a.setlistId ? "⛪" : "📀"}</span></div>`;
 }
 function renderAlbums() {
@@ -1732,7 +1736,7 @@ function openProjector(slides, cover) {
   if (!slides.length) return toast("Não há letra para projetar.");
   pj.slides = slides;
   pj.i = 0;
-  $("#pj-bg").innerHTML = coverArt(cover ?? 7);
+  $("#pj-bg").innerHTML = cover && typeof cover === "object" ? coverImg(cover) : coverArt(cover ?? 7); // a música inteira: usa a capa ilustrada
   $("#projector").classList.remove("hidden");
   $("#projector").focus();
   pjRender();
@@ -1762,7 +1766,7 @@ $("#proj-song").onclick = () => {
   const s = dlgSong;
   const o = s.options || {};
   $("#song-dialog").close();
-  openProjector(slidesFor(s.title, s.sections || [], o.mode === "catolica" ? o.moment : ""), s.cover);
+  openProjector(slidesFor(s.title, s.sections || [], o.mode === "catolica" ? o.moment : ""), s);
 };
 $("#sl-proj").onclick = () => {
   const data = slCollect();
@@ -3279,7 +3283,7 @@ function play(song) {
   syncFavUI(song);
   startViz();
   if ("mediaSession" in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: song.title, artist: "AcaiaMusic", artwork: [{ src: "/icon-512.png", sizes: "512x512" }] });
+    navigator.mediaSession.metadata = new MediaMetadata({ title: song.title, artist: "AcaiaMusic", artwork: song.illustration?.url ? [{ src: song.illustration.url, sizes: "1024x1024", type: "image/jpeg" }] : [{ src: "/icon-512.png", sizes: "512x512" }] });
   }
 }
 let viz = null;

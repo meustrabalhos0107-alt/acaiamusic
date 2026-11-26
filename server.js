@@ -605,6 +605,8 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     if (job.attempt !== attempt) throw new Error("SUPERSEDED");
     await updateSongs((songs) => (old && songs.some((x) => x.id === outId) ? songs.map((x) => (x.id === outId ? song : x)) : [song, ...songs]));
     set({ status: "done", message: pron?.score != null ? `Pronta! Pronúncia: ${pron.score}% da letra entendida.` : "Pronta!", song });
+    // Capa ilustrada do tema, automática (em segundo plano)
+    autoIllustrate(outId);
     // Cifra tirada da própria música: o ouvido (Whisper + acordes) escuta em segundo plano, sem atrasar a fila
     if (!audioChords && sung && hearingUrl()) {
       listen(mp3, language)
@@ -836,11 +838,11 @@ app.post("/api/songs", (req, res) => {
 
 // ---------- Capa ilustrada (imagem do tema central da música, para o vídeo de status) ----------
 const illustrating = new Set();
-app.post("/api/songs/:id/illustration", async (req, res) => {
-  const song = (await loadSongs()).find((s) => s.id === req.params.id);
-  if (!song) return res.status(404).json({ error: "Música não encontrada." });
-  if (song.illustration && !req.body?.novo) return res.json(song.illustration);
-  if (illustrating.has(song.id)) return res.status(409).json({ error: "A capa desta música já está sendo criada." });
+// Cria a capa ilustrada de uma música (a IA descreve o tema da letra, a GPU desenha) e guarda
+async function makeIllustration(songId) {
+  const song = (await loadSongs()).find((s) => s.id === songId);
+  if (!song) throw new Error("Música não encontrada.");
+  if (illustrating.has(song.id)) throw Object.assign(new Error("A capa desta música já está sendo criada."), { busy: true });
   illustrating.add(song.id);
   try {
     const o = song.options || {};
@@ -856,14 +858,37 @@ app.post("/api/songs/:id/illustration", async (req, res) => {
     await fs.mkdir(dir, { recursive: true });
     const name = `capa-${Date.now()}.jpg`;
     await fs.writeFile(path.join(dir, name), img);
-    if (song.illustration?.file) await fs.rm(path.join(dir, song.illustration.file), { force: true });
     const illustration = { url: `/audio/media/${song.id}/${name}`, file: name, prompt, at: new Date().toISOString() };
-    await updateSongs((songs) => songs.map((s) => (s.id === song.id ? { ...s, illustration } : s)));
-    res.json(illustration);
-  } catch (e) {
-    res.status(502).json({ error: e.message });
+    let old = null;
+    await updateSongs((songs) => songs.map((s) => (s.id === song.id ? ((old = s.illustration), { ...s, illustration }) : s)));
+    if (old?.file && old.file !== name) await fs.rm(path.join(dir, old.file), { force: true });
+    return illustration;
   } finally {
     illustrating.delete(song.id);
+  }
+}
+// fila das capas automáticas (uma de cada vez, sem atrasar a criação das músicas)
+let illustrationChain = Promise.resolve();
+function autoIllustrate(songId) {
+  illustrationChain = illustrationChain
+    .then(() => makeIllustration(songId))
+    .then((ill) => console.log("Capa ilustrada pronta:", ill.prompt.slice(0, 70)))
+    .catch((e) => !e.busy && console.log("Capa automática falhou:", e.message));
+}
+// músicas que ainda não têm capa ilustrada (as antigas e as que perderam a capa ao serem refeitas)
+async function illustrateMissing() {
+  const songs = await loadSongs();
+  const queued = new Set(queue.map((q) => q.input?.replaceId).filter(Boolean)); // essas ganham capa quando forem refeitas
+  for (const s of songs) if (!s.illustration && !queued.has(s.id)) autoIllustrate(s.id);
+}
+app.post("/api/songs/:id/illustration", async (req, res) => {
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  if (song.illustration && !req.body?.novo) return res.json(song.illustration);
+  try {
+    res.json(await makeIllustration(song.id));
+  } catch (e) {
+    res.status(e.busy ? 409 : 502).json({ error: e.message });
   }
 });
 
@@ -1477,6 +1502,8 @@ app.listen(PORT, () => {
     queue.forEach((q) => (q.notBefore = 0));
     pump();
   }
-  console.log("Letras: Pollinations (gratuito)");
+  console.log(`Letras: ${process.env.GEMINI_API_KEY ? "Gemini" : "Pollinations (gratuito)"}`);
   console.log(`Música: ${ACE_SPACE} ${HF_TOKEN ? "(com HF_TOKEN)" : "(SEM HF_TOKEN: configure no .env)"}`);
+  // capas ilustradas que faltam (só com o Modal ligado, que desenha as imagens de graça nos créditos)
+  if (getSettings().modalUrl) setTimeout(() => illustrateMissing().catch(() => {}), 60000);
 });
