@@ -138,3 +138,62 @@ def ouvir(item: dict):
         words = [[c["text"].strip(), round(c["timestamp"][0] or 0, 2), round(c["timestamp"][1] or c["timestamp"][0] or 0, 2)] for c in r.get("chunks", [])]
         chords, key, tempo = _acordes(str(out / "no_vocals.wav"))
         return {"text": r["text"].strip(), "words": words, "chords": chords, "key": key, "tempo": round(tempo)}
+
+
+# ---------- Ilustrador: capa com a imagem do tema da música (SDXL Lightning, 4 passos) ----------
+# Modelos de licença aberta (uso comercial permitido): SDXL 1.0 (OpenRAIL++) + SDXL-Lightning (ByteDance).
+# Endereço: https://<conta>--acaiamusic-ouvido-ilustrar.<região>.modal.run
+ilustra_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install("torch==2.5.1", "diffusers==0.31.0", "transformers==4.46.3", "accelerate==1.1.1", "safetensors", "fastapi[standard]", "pillow")
+    .run_commands(
+        "python -c \"from huggingface_hub import snapshot_download, hf_hub_download; "
+        "snapshot_download('stabilityai/stable-diffusion-xl-base-1.0', allow_patterns=['*.json','*.txt','tokenizer*/*','text_encoder*/*.fp16.safetensors','unet/config.json','scheduler/*']); "
+        "snapshot_download('madebyollin/sdxl-vae-fp16-fix'); "
+        "hf_hub_download('ByteDance/SDXL-Lightning', 'sdxl_lightning_4step_unet.safetensors')\""
+    )
+)
+_pipe = None
+
+
+def _ilustrador():
+    global _pipe
+    if _pipe is None:
+        import torch
+        from diffusers import AutoencoderKL, EulerDiscreteScheduler, StableDiffusionXLPipeline, UNet2DConditionModel
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
+
+        base = "stabilityai/stable-diffusion-xl-base-1.0"
+        unet = UNet2DConditionModel.from_config(base, subfolder="unet").to("cuda", torch.float16)
+        unet.load_state_dict(load_file(hf_hub_download("ByteDance/SDXL-Lightning", "sdxl_lightning_4step_unet.safetensors"), device="cuda"))
+        vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float16)
+        _pipe = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, vae=vae, torch_dtype=torch.float16, variant="fp16").to("cuda")
+        _pipe.scheduler = EulerDiscreteScheduler.from_config(_pipe.scheduler.config, timestep_spacing="trailing")
+    return _pipe
+
+
+@app.function(
+    image=ilustra_image,
+    gpu="T4",
+    secrets=[modal.Secret.from_name("acaiamusic")],
+    scaledown_window=60,
+    max_containers=1,
+    timeout=10 * 60,
+)
+@modal.fastapi_endpoint(method="POST")
+def ilustrar(item: dict):
+    import base64
+    import io
+
+    import torch
+
+    if item.get("key") != os.environ["ACESTEP_API_KEY"]:
+        return {"error": "Chave incorreta."}
+    prompt = str(item.get("prompt", ""))[:900]
+    neg = "text, letters, words, watermark, logo, signature, deformed, distorted, extra fingers, ugly, blurry, low quality"
+    g = torch.Generator("cuda").manual_seed(int(item.get("seed", 0)) or torch.seed() % 2**31)
+    img = _ilustrador()(prompt, negative_prompt=neg, num_inference_steps=4, guidance_scale=0, width=1024, height=1024, generator=g).images[0]
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=90)
+    return {"image": base64.b64encode(buf.getvalue()).decode()}

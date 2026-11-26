@@ -116,3 +116,30 @@ export function chordSheetFromAudio(order, heard) {
   for (const m of (pick?.lines.join(" ") || "").matchAll(/\[([^\]]+)\]/g)) if (seq[seq.length - 1] !== m[1]) seq.push(m[1]);
   return { key: heard.key, progression: [...new Set(seq)].slice(0, 6).join(" – "), sections: out, source: "audio" };
 }
+
+// Capa ilustrada: imagem gerada na GPU do Modal (SDXL Lightning); sem o Modal, tenta o Pollinations (grátis)
+export function illustratorUrl() {
+  const s = getSettings();
+  return /acaiamusic-estudio-estudio/.test(s.modalUrl || "") ? s.modalUrl.replace("acaiamusic-estudio-estudio", "acaiamusic-ouvido-ilustrar").replace(/\/+$/, "") : "";
+}
+export async function illustrate(prompt, seed = Math.floor(Math.random() * 2 ** 31)) {
+  const url = illustratorUrl();
+  if (url) {
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: getSettings().modalKey, prompt, seed }),
+        signal: AbortSignal.timeout(8 * 60 * 1000),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.image) return Buffer.from(j.image, "base64");
+      console.log("Ilustrador do Modal falhou:", j.error || r.status);
+    } catch (e) {
+      console.log("Ilustrador do Modal falhou:", e.message);
+    }
+  }
+  const r = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&seed=${seed}&model=flux`, { signal: AbortSignal.timeout(120000) });
+  if (!r.ok) throw new Error("O gerador de imagens gratuito está ocupado agora. Tente de novo em 1 minuto.");
+  return Buffer.from(await r.arrayBuffer());
+}

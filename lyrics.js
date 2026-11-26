@@ -517,3 +517,19 @@ ${current}`;
   if (!out.references.length) out.references = plan.references || [];
   return out;
 }
+
+// ---------- Descrição da capa ilustrada (para o gerador de imagens) ----------
+// Imagem SIMBÓLICA do tema central (paisagens, luz, objetos, natureza): sem rostos nem pessoas
+// em destaque (geradores deformam figuras humanas, o que fica desrespeitoso em temas sacros) e sem texto.
+export async function illustrationPrompt({ title, sections = [], mode, moment, season, genre, moods = [] }) {
+  const chorus = sections.find((s) => /refr|chorus|resposta/i.test(s.name)) || sections[0];
+  const lyric = sections.slice(0, 3).map((s) => s.lines.join(" ")).join(" / ").slice(0, 900);
+  const system = `Você é diretor de arte. Escreva, EM INGLÊS, a descrição de UMA imagem ilustrativa (capa de música) que represente o tema central da letra.
+Regras: imagem simbólica e bonita (paisagem, luz, natureza, objetos e símbolos do tema); NADA de rostos ou pessoas em primeiro plano (no máximo silhuetas pequenas e distantes);${mode === "catolica" ? " símbolos cristãos/católicos respeitosos e coerentes com o tema e o tempo litúrgico (cores litúrgicas, luz, cruz, cálice, pomba, velas, Bíblia, vitrais, paisagens da Terra Santa);" : ""} sem texto, letras ou palavras na imagem; descreva cena, iluminação, paleta de cores e estilo artístico (ex.: oil painting, watercolor, cinematic light). Máximo de 60 palavras.
+Responda SOMENTE com JSON: {"prompt":"..."}`;
+  const user = `Título: ${title}\n${mode === "catolica" ? `Momento litúrgico: ${moment || "—"} · Tempo: ${season || "—"}\n` : ""}Estilo musical: ${genre || "—"} · Clima: ${moods.join(", ") || "—"}\nRefrão: ${(chorus?.lines || []).join(" ")}\nLetra: ${lyric}`;
+  const raw = await callLLM(system, user);
+  const p = String(raw?.prompt || "").replace(/\s+/g, " ").trim().slice(0, 600);
+  if (p.length < 20) throw new LyricsError("Não consegui descrever a imagem agora.");
+  return `${p}, high quality illustration, no text`;
+}

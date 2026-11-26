@@ -2034,7 +2034,7 @@ function openSong(song) {
 function selectTab(t) {
   $$("#dlg-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
   $$(".tab-pane").forEach((p) => p.classList.toggle("on", p.dataset.p === t));
-  if (t === "video") drawVideoPreview();
+  if (t === "video") (drawVideoPreview(), dlgSong && !dlgSong.illustration && makeIllustration(dlgSong));
   if (t === "editar" && dlgSong) drawWave(dlgSong);
 }
 $$("#dlg-tabs button").forEach((b) => b.addEventListener("click", () => selectTab(b.dataset.t)));
@@ -3021,7 +3021,9 @@ async function drawVideoArt(canvas, song, format) {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d");
-  const art = await loadImg("data:image/svg+xml;charset=utf-8," + encodeURIComponent(coverArt(song.cover ?? 1, 'width="800" height="800"')));
+  // capa ilustrada (imagem do tema da música) quando houver; senão, a arte abstrata da música
+  const pic = song.illustration?.url ? await loadImg(song.illustration.url).catch(() => null) : null;
+  const art = pic || (await loadImg("data:image/svg+xml;charset=utf-8," + encodeURIComponent(coverArt(song.cover ?? 1, 'width="800" height="800"'))));
   const logo = await loadImg("/icon.svg").catch(() => null);
   // fundo: capa ampliada, desfocada e escurecida
   ctx.filter = "blur(40px) saturate(1.2)";
@@ -3048,13 +3050,15 @@ async function drawVideoArt(canvas, song, format) {
   roundRect(ctx, cx, cy, cs, cs, 28);
   ctx.clip();
   ctx.drawImage(art, cx, cy, cs, cs);
-  ctx.fillStyle = "rgba(255,255,255,0.93)";
-  ctx.font = `900 ${cs * 0.3}px Segoe UI, Inter, Arial, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.shadowColor = "rgba(0,0,0,0.35)";
-  ctx.shadowBlur = 20;
-  ctx.fillText(initials(song.title), cx + cs / 2, cy + cs / 2);
+  if (!pic) {
+    ctx.fillStyle = "rgba(255,255,255,0.93)";
+    ctx.font = `900 ${cs * 0.3}px Segoe UI, Inter, Arial, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 20;
+    ctx.fillText(initials(song.title), cx + cs / 2, cy + cs / 2);
+  }
   ctx.restore();
 
   // textos
@@ -3125,6 +3129,28 @@ async function drawVideoArt(canvas, song, format) {
   ctx.restore();
   return layout;
 }
+// Cria a capa ilustrada (a IA descreve o tema da letra e a GPU desenha); a 1ª vez leva até 2 min
+async function makeIllustration(song, novo = false) {
+  const msg = $("#video-art-msg"), btn = $("#video-art");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  msg.textContent = "🎨 criando a imagem do tema… (até 2 min)";
+  try {
+    const ill = await api(`/api/songs/${song.id}/illustration`, { method: "POST", body: JSON.stringify({ novo }) });
+    song.illustration = ill;
+    const k = state.songs.findIndex((s) => s.id === song.id);
+    if (k >= 0) state.songs[k].illustration = ill;
+    msg.textContent = "pronta";
+    if (dlgSong?.id === song.id) drawVideoPreview();
+  } catch (e) {
+    msg.textContent = "";
+    toast(e.message, true, 7000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+$("#video-art").onclick = () => dlgSong && makeIllustration(dlgSong, true);
+
 async function drawVideoPreview() {
   if (!dlgSong) return;
   const c = $("#video-canvas");

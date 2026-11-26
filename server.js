@@ -6,9 +6,9 @@ import path from "node:path";
 import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client, handle_file } from "@gradio/client";
-import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, refineLyrics, sanitizeChords, writeLyrics } from "./lyrics.js";
+import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, illustrationPrompt, refineLyrics, sanitizeChords, writeLyrics } from "./lyrics.js";
 import { masterOrPlain } from "./audio.js";
-import { chordSheetFromAudio, hearingUrl, lyricScore, listen } from "./hearing.js";
+import { chordSheetFromAudio, hearingUrl, illustrate, lyricScore, listen } from "./hearing.js";
 import { createRegistro, registroPage } from "./registro.js";
 import { createHash } from "node:crypto";
 import { registerStudio } from "./studio.js";
@@ -832,6 +832,39 @@ app.post("/api/songs", (req, res) => {
   };
   enqueueSong(id, input, { label: plan.title });
   res.json({ jobId: id });
+});
+
+// ---------- Capa ilustrada (imagem do tema central da música, para o vídeo de status) ----------
+const illustrating = new Set();
+app.post("/api/songs/:id/illustration", async (req, res) => {
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  if (song.illustration && !req.body?.novo) return res.json(song.illustration);
+  if (illustrating.has(song.id)) return res.status(409).json({ error: "A capa desta música já está sendo criada." });
+  illustrating.add(song.id);
+  try {
+    const o = song.options || {};
+    let prompt;
+    try {
+      prompt = await illustrationPrompt({ title: song.title, sections: song.sections || [], mode: o.mode, moment: o.moment, season: o.season, genre: song.genre, moods: o.moods || [] });
+    } catch (e) {
+      console.log("Descrição da capa pela IA falhou, usando o título:", e.message);
+      prompt = `symbolic ${o.mode === "catolica" ? "sacred christian " : ""}illustration inspired by the theme "${song.title}", warm cinematic light, oil painting, peaceful, no people, no text`;
+    }
+    const img = await illustrate(prompt);
+    const dir = studio.mediaDir(song.id);
+    await fs.mkdir(dir, { recursive: true });
+    const name = `capa-${Date.now()}.jpg`;
+    await fs.writeFile(path.join(dir, name), img);
+    if (song.illustration?.file) await fs.rm(path.join(dir, song.illustration.file), { force: true });
+    const illustration = { url: `/audio/media/${song.id}/${name}`, file: name, prompt, at: new Date().toISOString() };
+    await updateSongs((songs) => songs.map((s) => (s.id === song.id ? { ...s, illustration } : s)));
+    res.json(illustration);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  } finally {
+    illustrating.delete(song.id);
+  }
 });
 
 // ---------- Registro de Criação (gratuito: carimbo de tempo no OpenTimestamps) ----------
