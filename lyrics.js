@@ -259,6 +259,93 @@ export const ARRANGEMENTS = {
     genreTags: "live worship performance",
     tags: ["live performance recording in a church, acoustic band, natural room reverb, warm and organic sound", "congregation softly singing along on the chorus, real live feel, slight ambience"],
   },
+  // tipos exclusivos: mudam o caráter da música (voz, instrumentos, andamento)
+  orquestra: {
+    kb: 131, // batida do PSR-E343 que combina com esta versão
+    label: "Orquestral",
+    genre: "Orquestral (cordas)",
+    genreTags: "cinematic orchestral ballad",
+    tags: ["full symphonic orchestra arrangement, lush strings, french horns, harp, timpani swells, no drum kit, no synths", "cinematic and majestic, grand emotional build to the final chorus, concert hall reverb"],
+  },
+  coral: {
+    kb: 24, // batida do PSR-E343 que combina com esta versão
+    label: "Coral a 4 vozes",
+    genre: "Coral",
+    genreTags: "choral hymn",
+    voice: "Coral",
+    voiceTags: ["mixed SATB choir singing in four-part harmony, soprano alto tenor bass"],
+    tags: ["choir arrangement, rich four-part vocal harmony, soft organ and strings accompaniment", "church acoustics, natural cathedral reverb, reverent dynamics"],
+  },
+  capela: {
+    label: "À capela",
+    genre: "À capela",
+    genreTags: "a cappella vocal arrangement",
+    voiceTags: ["lead voice with backing vocal harmonies, humming and oohs"],
+    tags: ["a cappella, voices only, no instruments at all, vocal harmonies, vocal bass line", "intimate natural room sound, clear blend of voices"],
+  },
+  gregoriano: {
+    kb: 24, // batida do PSR-E343 que combina com esta versão
+    label: "Estilo gregoriano",
+    genre: "Canto gregoriano",
+    genreTags: "gregorian chant",
+    voice: "Coral masculino",
+    voiceTags: ["male monastic choir singing in unison, latin chant style"],
+    bpm: "auto",
+    tags: ["gregorian chant style, monophonic unison melody, free flowing rhythm, soft organ drone", "medieval monastery atmosphere, long stone church reverb, meditative and sacred"],
+  },
+  worship: {
+    label: "Louvor moderno",
+    genre: "Louvor moderno (banda)",
+    genreTags: "modern worship anthem",
+    bpm: "auto",
+    tags: ["modern worship band, ambient electric guitars, piano, pads, bass and live drums", "big anthemic build, soaring final chorus, emotional bridge, arena worship sound"],
+  },
+  bossa: {
+    label: "Bossa nova",
+    genre: "Bossa nova",
+    genreTags: "bossa nova",
+    bpm: "auto",
+    tags: ["brazilian bossa nova, nylon string guitar with syncopated bossa rhythm, soft brushes, upright bass, light flute", "smooth, relaxed and elegant, intimate close vocal"],
+  },
+  viola: {
+    label: "Viola caipira",
+    genre: "Moda de viola",
+    genreTags: "moda de viola caipira",
+    bpm: "auto",
+    tags: ["brazilian viola caipira ten-string guitar, traditional countryside moda de viola", "rustic and heartfelt, simple acoustic accompaniment, warm natural sound"],
+  },
+  forro: {
+    label: "Forró pé de serra",
+    genre: "Forró pé de serra",
+    genreTags: "forró pé de serra baião",
+    bpm: "auto",
+    tags: ["brazilian forró pé de serra, accordion (sanfona), zabumba and triangle trio", "joyful northeastern brazilian groove, festive and danceable"],
+  },
+  infantil: {
+    kb: 126, // batida do PSR-E343 que combina com esta versão
+    label: "Versão infantil",
+    genre: "Infantil",
+    genreTags: "children's song",
+    voice: "Coral infantil",
+    voiceTags: ["children's choir singing, bright and joyful kids voices"],
+    tags: ["playful children's arrangement, ukulele, glockenspiel, claps and light percussion", "happy, simple and catchy, easy to sing along"],
+  },
+  ninar: {
+    kb: 131, // batida do PSR-E343 que combina com esta versão
+    label: "Canção de ninar",
+    genre: "Canção de ninar",
+    genreTags: "lullaby",
+    bpm: "slow",
+    tags: ["gentle lullaby, music box, soft celesta, harp and warm pads, no drums", "very soft and tender, whisper-like close vocal, calm and peaceful"],
+  },
+  instrumental: {
+    label: "Instrumental",
+    genre: "Instrumental (meditação)",
+    genreTags: "instrumental meditative",
+    voice: "Instrumental",
+    bpm: "calm",
+    tags: ["instrumental version, the vocal melody played by solo instruments (piano and cello), no singing", "meditative and prayerful, soft dynamics, for adoration and silent prayer"],
+  },
 };
 function modernTags(o) {
   const instrumental = o.voice === "Instrumental";

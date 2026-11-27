@@ -1205,6 +1205,9 @@ app.post("/api/songs/:id/variant", async (req, res) => {
   if (!song) return res.status(404).json({ error: "Música não encontrada." });
   if (!song.options || !song.sections) return res.status(400).json({ error: "Esta música é antiga e não guardou como foi feita. Use ✎ Nova versão." });
   const o = cleanOptions(song.options);
+  // andamento: "auto" = o planejador escolhe o do estilo; "slow"/"calm" = mais lenta; padrão: violão e piano um pouco mais calmos
+  const mode = A.bpm || (kind === "violao" || kind === "piano" ? "calm" : "keep");
+  const bpm = !o.bpm || mode === "keep" ? o.bpm : mode === "auto" ? 0 : Math.max(45, Math.round(o.bpm * (mode === "slow" ? 0.82 : 0.92)));
   const options = cleanOptions({
     ...o,
     arrangement: kind,
@@ -1212,9 +1215,12 @@ app.post("/api/songs/:id/variant", async (req, res) => {
     genreTags: A.genreTags,
     instruments: [],
     instrumentTags: [],
-    keyboardStyle: 0, // a batida do teclado é escolhida de novo, combinando com a versão
+    ...(A.voice ? { voice: A.voice } : {}),
+    ...(A.voiceTags ? { voiceTags: A.voiceTags, voiceStyles: [] } : {}),
+    keyboardStyle: A.kb || 0, // a batida do teclado é escolhida de novo, combinando com a versão
     quality: "high",
-    bpm: o.bpm && kind !== "aovivo" ? Math.max(50, Math.round(o.bpm * 0.92)) : o.bpm, // acústica: um pouco mais calma
+    bpm,
+    tempo: bpm ? o.tempo : "auto",
   });
   const title = `${song.title} (${A.label.toLowerCase()})`;
   const id = randomUUID();
