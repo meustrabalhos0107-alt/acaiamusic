@@ -176,6 +176,8 @@ export function cleanOptions(o = {}) {
     keyboardStyle: Number(o.keyboardStyle) >= 1 && Number(o.keyboardStyle) <= 136 ? Math.round(Number(o.keyboardStyle)) : 0,
     // versão especial da mesma música: só violão, só piano ou ao vivo na igreja
     arrangement: ARRANGEMENTS[o.arrangement] ? o.arrangement : "",
+    // afinação da música: 440 Hz (padrão), 432 Hz ou 528 Hz
+    tuning: ["432", "528"].includes(String(o.tuning)) ? String(o.tuning) : "440",
   };
 }
 

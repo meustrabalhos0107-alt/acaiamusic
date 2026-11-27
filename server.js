@@ -646,7 +646,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     // (o Render achava que o app tinha morrido e o reiniciava sem parar)
     // o estúdio com GPU devolve 2 versões: a 1ª é a principal, a 2ª fica para a pessoa comparar
     const [mainRaw, altRaw] = Array.isArray(raw) ? raw : [raw];
-    const { mp3, seconds: realSeconds, mastered } = await masterOrPlain(mainRaw);
+    const { mp3, seconds: realSeconds, mastered } = await masterOrPlain(mainRaw, { tuning: options.tuning });
     if (job.canceled) throw new Error("CANCELED");
     set({ status: "saving", message: "Salvando…" });
     // "Refazer": a música nova fica no lugar da antiga (mesmo id: álbuns e repertórios continuam valendo)
@@ -704,6 +704,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
         engine: reference ? `${engine} · com áudio de referência` : engine,
         musicPrompt: params.prompt,
         mastered: Boolean(mastered),
+        ...(options.tuning && options.tuning !== "440" ? { tuning: options.tuning } : {}),
         generationSeconds: Math.round((Date.now() - startedAt) / 1000),
         ...(pron && pron.score != null ? { pronunciation: pron.score, takes: pron.take } : {}),
       },
@@ -717,7 +718,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     if (altRaw)
       (async () => {
         try {
-          const a = await masterOrPlain(altRaw);
+          const a = await masterOrPlain(altRaw, { tuning: options.tuning });
           await fs.writeFile(path.join(SONGS_DIR, `${outId}-v2.mp3`), a.mp3);
           const v2 = { url: `/audio/${outId}-v2.mp3${old ? `?v=${rev}` : ""}`, duration: Math.round(a.seconds || 0) };
           await updateSongs((songs) => songs.map((x) => (x.id === outId && x.url === song.url ? { ...x, alt: v2 } : x)));

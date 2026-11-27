@@ -318,6 +318,13 @@
             </div>
             <div class="segmented tempo" id="tempo-presets"></div>
             <input id="bpm" type="range" min="40" max="180" step="1" value="84" aria-label="BPM" />
+            <p class="sub-label">🎵 Afinação <small class="sum" id="sum-tuning"></small></p>
+            <div class="segmented" id="tuning">
+              <button class="on" data-t="440" title="Afinação padrão do mundo todo (Lá = 440 Hz)"><b>440 Hz</b><small>padrão</small></button>
+              <button data-t="432" title="Afinação em Lá = 432 Hz, chamada de “natural”; soa um pouquinho mais grave e suave">  <b>432 Hz</b><small>“natural”, mais suave</small></button>
+              <button data-t="528" title="Afinação com o Dó em 528 Hz (Lá = 444 Hz), chamada de “frequência do amor”">  <b>528 Hz</b><small>“frequência do amor”</small></button>
+            </div>
+            <small class="muted tuning-note">432 Hz e 528 Hz são afinações que muita gente acha mais suaves e usa para meditação e oração. Não há comprovação científica de que curem; o que a música faz por você continua sendo a oração e a beleza dela.</small>
           </section>
 
           <!-- INSTRUMENTOS -->
@@ -1118,6 +1125,13 @@
       <button class="share-card" data-kind="orquestra"><span>🎻</span><b>Orquestral</b><small>cordas, metais, grandiosa</small></button>
       <button class="share-card" data-kind="worship"><span>🔥</span><b>Louvor moderno</b><small>banda completa, refrão que explode</small></button>
     </div>
+    <p class="sub-label">Afinação <small class="muted">sem gravar de novo: muda só a afinação desta gravação (leva segundos)</small></p>
+    <div class="share-grid">
+      <button class="share-card" data-tune="432" title="Cria uma cópia desta música afinada em 432 Hz"><span>🌿</span><b>432 Hz</b><small>“afinação natural”, mais suave</small></button>
+      <button class="share-card" data-tune="528" title="Cria uma cópia desta música afinada com o Dó em 528 Hz"><span>💗</span><b>528 Hz</b><small>“frequência do amor”</small></button>
+      <button class="share-card" data-tune="440" title="Cria uma cópia na afinação padrão (440 Hz)"><span>🎼</span><b>440 Hz</b><small>afinação padrão</small></button>
+    </div>
+    <small class="muted">432 Hz e 528 Hz são afinações que muita gente acha mais suaves e usa para meditação e oração. Não há comprovação científica de que curem; o que a música faz por você continua sendo a oração e a beleza dela.</small>
     <p class="sub-label">Brasileiras e para crianças</p>
     <div class="share-grid">
       <button class="share-card" data-kind="bossa"><span>🌊</span><b>Bossa nova</b><small>violão de nylon, elegante</small></button>
@@ -1217,6 +1231,8 @@
       <summary>🎵 Criação de músicas</summary>
       <div class="set-row"><span><b>Qualidade da gravação</b><small>Rápida fica pronta antes; alta tem mais detalhe no som.</small></span>
         <div class="segmented mini-seg" id="set-quality"><button data-v="fast" title="Grava mais rápido">⚡ Rápida</button><button data-v="high" title="Mais detalhe no som, demora um pouco mais">💎 Alta</button></div></div>
+      <div class="set-row"><span><b>Afinação padrão</b><small>432 e 528 Hz: afinações que muita gente acha mais suaves (sem comprovação científica de cura).</small></span>
+        <div class="segmented mini-seg" id="set-tuning"><button data-v="440" title="Afinação padrão">440</button><button data-v="432" title="Afinação “natural”">432</button><button data-v="528" title="“Frequência do amor”">528</button></div></div>
       <div class="set-row"><span><b>Revisão de pronúncia</b><small>O Whisper ouve a música antes de salvar e grava de novo se a letra não ficou clara.</small></span><span class="set-note">sempre ligada</span></div>
     </details>
 

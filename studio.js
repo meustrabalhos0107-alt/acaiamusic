@@ -6,7 +6,7 @@ import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
-import { stemsToMp3 } from "./audio.js";
+import { stemsToMp3, pitchFilters, tuningRatio } from "./audio.js";
 import { getSettings } from "./kaggle.js";
 import { animateCover, harmonize, illustrate } from "./hearing.js";
 import { storyboard } from "./lyrics.js";
@@ -777,6 +777,57 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
         console.error("Erro karaokê:", e.message);
         fs.rm(dir, { recursive: true, force: true }).catch(() => {});
         set({ status: "error", error: "Não consegui juntar a gravação: " + e.message.slice(0, 200) });
+      }
+    });
+    res.json({ jobId: id });
+  });
+
+  // ===== Afinação 432 / 528 / 440 Hz de uma música pronta (cria uma música nova; sem GPU) =====
+  const TUNE_LABEL = { 440: "440 Hz", 432: "432 Hz", 528: "528 Hz" };
+  app.post("/api/songs/:id/retune", async (req, res) => {
+    const song = (await loadSongs()).find((s) => s.id === req.params.id);
+    if (!song) return res.status(404).json({ error: "Música não encontrada." });
+    const to = String(req.body?.tuning || "");
+    if (!TUNE_LABEL[to]) return res.status(400).json({ error: "Escolha a afinação." });
+    const from = song.spec?.tuning || "440";
+    if (to === from) return res.status(400).json({ error: `Esta música já está em ${TUNE_LABEL[to]}.` });
+    const { id, set } = newJob();
+    editChain = editChain.then(async () => {
+      const newId = randomUUID();
+      try {
+        set({ status: "generating", message: `Afinando em ${TUNE_LABEL[to]}…`, progress: 10 });
+        const src = path.join(SONGS_DIR, `${song.id}.mp3`), out = path.join(SONGS_DIR, `${newId}.mp3`);
+        let ok = false;
+        for (const p of pitchFilters(tuningRatio(to, from))) {
+          try {
+            await ffmpeg(["-i", src, "-af", `aresample=44100,${p}alimiter=limit=0.89`, "-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "256k", out], 10 * 60 * 1000);
+            ok = true;
+            break;
+          } catch (e) {
+            console.log("Afinação: tentando o método simples:", e.message.slice(0, 100));
+          }
+        }
+        if (!ok) throw new Error("não consegui mudar a afinação");
+        const base = song.title.replace(/\s*\((432|528|440) Hz\)$/, "");
+        const copy = {
+          ...song,
+          id: newId,
+          title: to === "440" ? `${base} (440 Hz)` : `${base} (${TUNE_LABEL[to]})`,
+          url: `/audio/${newId}.mp3`,
+          createdAt: new Date().toISOString(),
+          favorite: false,
+          parentId: song.id,
+          stems: undefined,
+          alt: undefined,
+          timing: undefined,
+          lastVideo: undefined,
+          spec: { ...(song.spec || {}), tuning: to === "440" ? undefined : to, engine: `${song.spec?.engine || "ACAIAMUSIC"} · afinada em ${TUNE_LABEL[to]}` },
+        };
+        await updateSongs((songs) => [copy, ...songs]);
+        set({ status: "done", message: `Pronta em ${TUNE_LABEL[to]}!`, song: copy, progress: 100 });
+      } catch (e) {
+        fs.rm(path.join(SONGS_DIR, `${newId}.mp3`), { force: true }).catch(() => {});
+        set({ status: "error", error: "Não consegui mudar a afinação: " + e.message.slice(0, 200) });
       }
     });
     res.json({ jobId: id });

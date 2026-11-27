@@ -111,7 +111,17 @@ export async function stemsToMp3(files, dir) {
 
 const TONE = "highpass=f=28,equalizer=f=280:t=q:w=1.2:g=-1.5,treble=g=1.5:f=9500,acompressor=threshold=-20dB:ratio=1.8:attack=25:release=280:makeup=1.5";
 
-export async function master(buf) {
+// Afinação: o Lá de referência. 432 Hz ("afinação natural"); 528 Hz = Dó em 528 Hz, que dá Lá em 444 Hz.
+// Muda só a altura (não o andamento) e preserva o timbre da voz.
+export const TUNINGS = { 440: 440, 432: 432, 528: 444 };
+export const tuningRatio = (to, from = "440") => (TUNINGS[to] || 440) / (TUNINGS[from] || 440);
+const pitchFilters = (r) =>
+  Math.abs(r - 1) < 1e-4
+    ? [""]
+    : [`rubberband=pitch=${r.toFixed(6)}:formant=preserved,`, `asetrate=${Math.round(44100 * r)},aresample=44100,atempo=${(1 / r).toFixed(6)},`];
+export { pitchFilters };
+
+export async function master(buf, { tuning = "440" } = {}) {
   const id = randomUUID();
   const src = path.join(os.tmpdir(), `acaia-src-${id}`);
   const out = path.join(os.tmpdir(), `acaia-master-${id}.mp3`);
@@ -124,7 +134,18 @@ export async function master(buf) {
     if (!Number.isFinite(I) || I < -70) throw new Error("não consegui medir o volume");
     const gain = Math.max(-12, Math.min(18, -13 - I)); // alvo: -13 LUFS (volume de streaming)
     // 2) ganho fixo + limitador (teto ~ -1 dB), uma passada só
-    const log2 = await runFfmpeg(["-i", src, "-af", `aresample=44100,${TONE},volume=${gain.toFixed(2)}dB,alimiter=limit=0.89:attack=5:release=60:level=false`, "-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "256k", out]);
+    // afinação 432/528 Hz: tenta o rubberband (melhor) e, se não houver, o método simples
+    let log2 = "";
+    const pf = pitchFilters(tuningRatio(String(tuning)));
+    for (const [k, p] of pf.entries()) {
+      try {
+        log2 = await runFfmpeg(["-i", src, "-af", `aresample=44100,${p}${TONE},volume=${gain.toFixed(2)}dB,alimiter=limit=0.89:attack=5:release=60:level=false`, "-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "256k", out]);
+        break;
+      } catch (e) {
+        if (k === pf.length - 1) throw e;
+        console.log("Afinação: rubberband indisponível, usando o método simples:", e.message.slice(0, 100));
+      }
+    }
     const d = /time=(\d+):(\d+):([\d.]+)/g;
     let secs = 0;
     for (const x of log2.matchAll(d)) secs = Number(x[1]) * 3600 + Number(x[2]) * 60 + Number(x[3]);
@@ -136,9 +157,9 @@ export async function master(buf) {
 }
 
 // Masteriza; se o ffmpeg falhar por qualquer motivo, salva a música como veio (nunca perde a música)
-export async function masterOrPlain(buf) {
+export async function masterOrPlain(buf, opts = {}) {
   try {
-    return await master(buf);
+    return await master(buf, opts);
   } catch (e) {
     console.log("Masterização pulada:", e.message);
   }

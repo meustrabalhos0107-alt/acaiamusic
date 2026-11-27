@@ -1452,3 +1452,7 @@ dialog .eyebrow { padding-right: 100px; }
   /* no celular o 1º cartão de cada grupo ocupa a linha toda (sem cartão sozinho no fim) */
   .actions.actions-3 > :first-child { grid-column: 1 / -1; }
 }
+
+/* afinação */
+#tuning button b { font-size: 0.9rem; }
+.tuning-note { display: block; margin-top: 6px; line-height: 1.45; }

@@ -710,6 +710,7 @@ function musicOptions() {
     voiceStyles: instrumental ? [] : state.voiceStyles.map((v) => v[0]),
     quality: state.quality,
     keyboardStyle: state.keyboardStyle || 0,
+    tuning: state.tuning || "440",
   };
 }
 
@@ -2275,7 +2276,7 @@ function openSong(song) {
   const o = song.options || {};
   $("#dlg-tags").innerHTML = [
     o.mode === "catolica" && `⛪ ${o.moment}`, o.mode === "catolica" && o.season, song.genre, o.bpm && `${o.bpm} BPM`,
-    o.key && `Tom ${o.key.replace(" major", "").replace(" minor", "m")}`, song.keyboard && `🎹 PSR-E343 · Estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}${song.keyboard.suggested ? " (sugerido)" : ""}`, song.voice, ...(o.instruments || []),
+    o.key && `Tom ${o.key.replace(" major", "").replace(" minor", "m")}`, song.keyboard && `🎹 PSR-E343 · Estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}${song.keyboard.suggested ? " (sugerido)" : ""}`, song.spec?.tuning && `🎵 Afinação ${song.spec.tuning} Hz · no teclado: função Tuning em ${song.spec.tuning === "528" ? "444,0" : "432,0"} Hz`, song.voice, ...(o.instruments || []),
   ].filter(Boolean).map((s) => `<span>${esc(s)}</span>`).join("");
   $("#dlg-download").href = song.url;
   $("#dlg-download").download = `${safeName(song.title)}.mp3`;
@@ -2600,6 +2601,7 @@ function applySpec(song) {
   $("#idea").value = sp.idea || "";
   $("#idea").dispatchEvent(new Event("input"));
   state.keyboardStyle = o.keyboardStyle || 0;
+  setTuning(o.tuning || "440");
   $("#kb-style").value = String(state.keyboardStyle);
   for (const [cat, list] of Object.entries(GENRES)) {
     const g = list.find((x) => x[0] === o.genre);
@@ -5389,3 +5391,45 @@ $("#set-refresh").onclick = async () => {
 // "⋯ Mais" da janela da música: fecha ao escolher uma ação ou ao abrir outra música
 $$(".more-panel button").forEach((b) => b.addEventListener("click", () => (b.closest("details").open = false)));
 $("#song-dialog").addEventListener("close", () => ($(".more-actions").open = false));
+
+// ---- Afinação (440 / 432 / 528 Hz) ----
+function setTuning(t) {
+  state.tuning = ["432", "528"].includes(String(t)) ? String(t) : "440";
+  $$("#tuning button").forEach((b) => b.classList.toggle("on", b.dataset.t === state.tuning));
+  $("#sum-tuning").textContent = state.tuning === "440" ? "" : `${state.tuning} Hz`;
+}
+$$("#tuning button").forEach((b) => b.addEventListener("click", () => setTuning(b.dataset.t)));
+setTuning(pref("tuning", "440"));
+// Ajustes: afinação padrão
+segPickTuning();
+function segPickTuning() {
+  if (!$("#set-tuning")) return;
+  segPick("#set-tuning", pref("tuning", "440"), (v) => (setPref("tuning", v), setTuning(v)));
+}
+$("#btn-settings").addEventListener("click", segPickTuning);
+// mudar a afinação de uma música pronta (cópia nova, sem GPU)
+$$("#variant-dialog [data-tune]").forEach((b) =>
+  b.addEventListener("click", async () => {
+    const song = dlgSong;
+    $("#variant-dialog").close();
+    try {
+      const { jobId } = await api(`/api/songs/${song.id}/retune`, { method: "POST", body: JSON.stringify({ tuning: b.dataset.tune }) });
+      toast(`🎵 Afinando “${song.title}” em ${b.dataset.tune} Hz…`, false, 4000);
+      for (;;) {
+        await sleep(1500);
+        const j = await api(`/api/jobs/${jobId}`);
+        if (j.status === "error") throw new Error(j.error);
+        if (j.status === "done") {
+          state.songs.unshift(j.song);
+          updateCount();
+          renderLibrary();
+          toast(`🎵 “${j.song.title}” pronta na biblioteca.`, false, 5000);
+          openSong(j.song);
+          break;
+        }
+      }
+    } catch (e) {
+      toast(e.message, true, 7000);
+    }
+  }),
+);
