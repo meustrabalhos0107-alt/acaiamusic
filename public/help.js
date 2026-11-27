@@ -173,6 +173,9 @@
     '[data-o="1"]': "Salmo e Aclamação com o texto exato da liturgia do dia.",
     '[data-o="0"]': "Salmo e Aclamação com letra nova criada pela IA, inspirada na liturgia.",
     "#md-go": "Lê a liturgia e monta a Missa (letras e, se marcado, as músicas).",
+    "#md-moments": "Marque só os momentos da Missa que você quer criar. O que você desmarca fica guardado para a próxima vez.",
+    "#md-mom-all": "Marca todos os momentos da Missa.",
+    "#md-mom-none": "Desmarca todos (depois marque só os que quer).",
     "#md-see": "Abre o repertório da Missa montada.",
     "#auto-start": "Liga o estúdio gratuito agora.",
     "#auto-stop": "Desliga o estúdio gratuito.",
@@ -239,9 +242,12 @@
   tip.setAttribute("role", "tooltip");
   document.body.appendChild(tip);
   let shownFor = null, timer = 0;
+  // explicação dos botões ligada ou desligada (Ajustes → Ajuda); fica guardado no aparelho
+  const tipsOn = () => !document.body.classList.contains("tips-off");
+  if (localStorage.getItem("acaia-tips") === "0") document.body.classList.add("tips-off");
   function show(el) {
     const txt = el.dataset.tip;
-    if (!txt) return;
+    if (!txt || !tipsOn()) return;
     // fica dentro da janela aberta (as janelas ficam na camada de cima)
     const host = el.closest("dialog[open]") || document.body;
     if (tip.parentNode !== host) host.appendChild(tip);
@@ -281,7 +287,7 @@
     (e) => {
       const el = target(e);
       longPressed = false;
-      if (!el) return hide();
+      if (!el || !tipsOn()) return hide();
       pressEl = el;
       clearTimeout(timer);
       timer = setTimeout(() => {
@@ -332,13 +338,20 @@
     btn.setAttribute("aria-pressed", on);
     window.toast?.(on ? "❓ Modo ajuda ligado: toque em qualquer botão para saber o que ele faz. Toque no ? rosa para desligar." : "Modo ajuda desligado.", false, 4500);
   });
+  window.setTips = (on) => {
+    localStorage.setItem("acaia-tips", on ? "1" : "0");
+    document.body.classList.toggle("tips-off", !on);
+    if (!on && document.body.classList.contains("help-mode")) btn.click(); // desliga o modo ajuda junto
+    hide();
+    window.toast?.(on ? "💡 Explicação dos botões ligada." : "Explicação dos botões desligada (ligue de novo em Ajustes → Ajuda).", false, 4000);
+  };
   // os diálogos abertos ficam por cima de tudo: o botão de ajuda vai junto
   new MutationObserver(() => {
     const open = [...document.querySelectorAll("dialog[open]")].pop();
     const host = open || document.body;
     if (btn.parentNode !== host) host.appendChild(btn);
   }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ["open"] });
-  if (!localStorage.getItem("acaia-help-hint")) {
+  if (!localStorage.getItem("acaia-help-hint") && tipsOn()) {
     localStorage.setItem("acaia-help-hint", "1");
     setTimeout(() => window.toast?.("💡 Dica: segure qualquer botão (ou pare o mouse em cima) para saber o que ele faz. O botão ? liga o modo ajuda.", false, 7000), 2500);
   }

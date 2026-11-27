@@ -149,7 +149,7 @@ export function clipUrl() {
   const s = getSettings();
   return /acaiamusic-estudio-estudio/.test(s.modalUrl || "") ? s.modalUrl.replace("acaiamusic-estudio-estudio", "acaiamusic-clipe-clipe").replace(/\/+$/, "") : "";
 }
-export async function animateCover(imageBuf, prompt, format = "vertical", extra = {}) {
+export async function animateCover(imageBuf, prompt, format = "vertical", { until: deadline, ...extra } = {}) {
   const url = clipUrl();
   if (!url) throw new Error("O clipe animado precisa do estúdio no Modal.");
   const key = getSettings().modalKey;
@@ -162,7 +162,8 @@ export async function animateCover(imageBuf, prompt, format = "vertical", extra 
   // começa o clipe e acompanha até ficar pronto (até 25 min, contando a GPU ligar)
   const { call_id } = await post({ image: imageBuf.toString("base64"), prompt, format, seed: Math.floor(Math.random() * 2 ** 31), ...extra });
   if (!call_id) throw new Error("o gerador de clipes não começou");
-  const until = Date.now() + 25 * 60 * 1000;
+  // deadline: quem chamou não quer esperar mais que isso (a GPU pode estar em fila no Modal)
+  const until = Math.min(Date.now() + 25 * 60 * 1000, deadline || Infinity);
   while (Date.now() < until) {
     await new Promise((r) => setTimeout(r, 10000));
     let j;
@@ -174,7 +175,8 @@ export async function animateCover(imageBuf, prompt, format = "vertical", extra 
     }
     if (j.video) return Buffer.from(j.video, "base64");
   }
-  throw new Error("o clipe demorou demais");
+  post({ cancel: call_id }).catch(() => {});
+  throw new Error("o clipe demorou demais (a GPU do Modal está ocupada agora)");
 }
 
 // Linha do tempo da letra (na ordem cantada): quando cada verso e cada palavra são cantados,

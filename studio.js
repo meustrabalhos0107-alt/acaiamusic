@@ -123,7 +123,7 @@ const int = (v, min, max, def) => {
   return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : def;
 };
 
-export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, HF_TOKEN, songTimeline }) {
+export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, HF_TOKEN, songTimeline, trackTask = () => {} }) {
   const MEDIA = (id) => path.join(SONGS_DIR, "media", id);
   let stemChain = Promise.resolve();
   let videoChain = Promise.resolve();
@@ -132,8 +132,12 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     const id = randomUUID();
     const job = { status: "waiting", message: "Aguardando…", createdAt: Date.now() };
     jobs.set(id, job);
-    const set = (p) => Object.assign(job, p, { updatedAt: Date.now() });
-    return { id, set };
+    // cancelado pela fila: não atualiza mais (e as etapas seguintes são puladas)
+    const set = (p) => {
+      if (job.canceled) return;
+      Object.assign(job, p, { updatedAt: Date.now() });
+    };
+    return { id, set, job };
   };
   const saveField = (songId, patch) =>
     updateSongs((songs) => songs.map((s) => (s.id === songId ? { ...s, ...patch } : s)));
@@ -173,199 +177,209 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     res.json({ jobId: id });
   });
 
-  // ===== Vídeo "história animada": a letra contada em cenas animadas, com a letra discreta embaixo =====
-  // 1) linha do tempo da letra (Whisper) → 2) o trecho é dividido em cenas, nas trocas de verso →
-  // 3) a IA escreve o roteiro (mesmo estilo e personagens) → 4) cada cena vira imagem e depois
-  // animação na GPU (3 ao mesmo tempo) → 5) o ffmpeg junta as cenas com transições suaves, a letra
-  // acendendo palavra por palavra (pequena, embaixo), o título discreto e uma barra fina.
-  const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), "fonts");
-  const filterPath = (p) => p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
-  const assTime = (s) => {
-    s = Math.max(0, s);
-    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-    return `${h}:${String(m).padStart(2, "0")}:${sec.toFixed(2).padStart(5, "0")}`;
-  };
-  const assEsc = (t) => String(t).replace(/[{}\\]/g, "");
-  function lyricsAss(lines, start, len, OW, OH, vertical) {
-    const size = Math.round(vertical ? OW * 0.056 : OH * 0.05);
-    const head = [
-      "[Script Info]",
-      "ScriptType: v4.00+",
-      `PlayResX: ${OW}`,
-      `PlayResY: ${OH}`,
-      "WrapStyle: 0",
-      "ScaledBorderAndShadow: yes",
-      "",
-      "[V4+ Styles]",
-      "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-      `Style: Letra,Poppins SemiBold,${size},&H00FFFFFF,&H70FFFFFF,&H78000000,&H96000000,0,0,0,0,100,100,0.5,0,1,1.2,0.8,2,${Math.round(OW * 0.09)},${Math.round(OW * 0.09)},${Math.round(OH * (vertical ? 0.085 : 0.1))},1`,
-      "",
-      "[Events]",
-      "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ].join("\n");
-    const inWin = lines.filter((l) => l.end > start + 0.3 && l.t < start + len - 0.5);
-    const ev = inWin.map((l, i) => {
-      const a = Math.max(0, l.t - start - 0.3);
-      const nextT = inWin[i + 1] ? inWin[i + 1].t - start - 0.3 : len;
-      const b = Math.min(len - 0.2, Math.max(a + 1, Math.min(l.end - start + 0.8, nextT)));
-      // \kf: cada palavra acende suavemente no tempo em que é cantada
-      let txt = `{\\fad(220,220)}{\\k${Math.round(Math.max(0, l.t - start - a) * 100)}}`;
-      l.words.forEach((w, k) => {
-        const next = l.words[k + 1] ? l.words[k + 1][1] : w[2];
-        txt += `{\\kf${Math.max(5, Math.round((next - w[1]) * 100))}}${assEsc(w[0])}${k < l.words.length - 1 ? " " : ""}`;
-      });
-      return `Dialogue: 0,${assTime(a)},${assTime(b)},Letra,,0,0,0,,${txt}`;
-    });
-    return head + "\n" + ev.join("\n") + "\n";
-  }
-  // divide o trecho em cenas de ~7 s, cortando nas entradas dos versos
-  function storyScenes(lines, start, len, title) {
-    const n = Math.max(4, Math.min(9, Math.round(len / 7)));
-    const starts = lines.map((l) => l.t - start).filter((t) => t > 2 && t < len - 3);
-    const cuts = [0];
-    for (let k = 1; k < n; k++) {
-      const target = (k * len) / n;
-      const snap = starts.filter((t) => Math.abs(t - target) <= 2.5 && t - cuts.at(-1) >= 4).sort((x, y) => Math.abs(x - target) - Math.abs(y - target))[0];
-      const c = snap ?? target;
-      if (c - cuts.at(-1) >= 4 && len - c >= 4) cuts.push(Math.round(c * 100) / 100);
-    }
-    cuts.push(len);
-    return cuts.slice(0, -1).map((a, i) => {
-      const b = cuts[i + 1];
-      const text = lines.filter((l) => l.end - start > a + 0.5 && l.t - start < b - 0.5).map((l) => l.text).join(" / ");
-      return { a, b, dur: b - a, text: text || (i === 0 ? `abertura instrumental da música "${title}"` : `momento instrumental da música "${title}"`) };
-    });
-  }
-  async function pool(items, limit, fn) {
-    const out = new Array(items.length);
-    let next = 0;
-    await Promise.all(
-      Array.from({ length: Math.min(limit, items.length) }, async () => {
-        while (next < items.length) {
-          const i = next++;
-          out[i] = await fn(items[i], i).catch((e) => ({ error: e }));
-        }
-      }),
-    );
-    return out;
-  }
-  async function storyVideo({ song, b, set, vertical, start, len, OW, OH, FPS, bar, overlayB64, id }) {
-    const dir = MEDIA(song.id);
-    mkdirSync(dir, { recursive: true });
-    set({ status: "generating", message: "Ouvindo a música para sincronizar a letra…", progress: 2 });
-    const tl = await songTimeline(song);
-    const scenes = storyScenes(tl.lines, start, len, song.title);
-    const tag = vertical ? "v" : "h";
-    const key = `${tag}-${start}-${scenes.map((s) => s.text).join("|").length}-${scenes.length}`;
-    const sdir = path.join(dir, `historia-${key}`);
-    mkdirSync(sdir, { recursive: true });
-    const manifestFile = path.join(sdir, "cenas.json");
-    let manifest = existsSync(manifestFile) && !b.novo ? JSON.parse(await fs.readFile(manifestFile, "utf8")) : null;
-    if (!manifest || manifest.scenes?.length !== scenes.length) {
-      set({ status: "generating", message: "A IA está escrevendo o roteiro das cenas…", progress: 5 });
-      const o = song.options || {};
-      const board = await storyboard({ title: song.title, scenes: scenes.map((s) => s.text), mode: o.mode, moment: o.moment, season: o.season, genre: song.genre, moods: o.moods || [] });
-      manifest = { scenes: scenes.map((s, i) => ({ ...s, ...board[i] })) };
-      for (const old of await fs.readdir(sdir)) await fs.rm(path.join(sdir, old), { force: true });
-      await fs.writeFile(manifestFile, JSON.stringify(manifest));
-    }
-    // imagens e animações (as que já existem são reaproveitadas)
-    const began = Date.now();
-    let done = 0;
-    const total = manifest.scenes.length;
-    const tick = setInterval(() => {
-      const s = Math.round((Date.now() - began) / 1000);
-      set({ status: "generating", message: `Animando as cenas com IA: ${done} de ${total} prontas · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} (uns 3 a 5 min na 1ª vez)`, progress: Math.min(70, 8 + Math.floor((done / total) * 55 + Math.min(7, s / 40))) });
-    }, 3000);
-    try {
-      await pool(manifest.scenes, 3, async (sc, i) => {
-        const img = path.join(sdir, `cena${i}.png`), clip = path.join(sdir, `cena${i}.mp4`);
-        if (!existsSync(img)) await fs.writeFile(img, await illustrate(sc.image));
-        if (!existsSync(clip)) {
-          try {
-            await fs.writeFile(clip, await animateCover(await fs.readFile(img), sc.motion, vertical ? "vertical" : "horizontal", { story: true, frames: 121 }));
-          } catch (e) {
-            console.log(`História: a cena ${i + 1} ficou sem animação (vai com movimento de câmera):`, e.message);
-          }
-        }
-        done++;
-      });
-    } finally {
-      clearInterval(tick);
-    }
-    if (!manifest.scenes.some((_, i) => existsSync(path.join(sdir, `cena${i}.png`)))) throw new Error("as imagens das cenas não foram criadas (o ilustrador está indisponível agora)");
-    // montagem
-    const ass = path.join(os.tmpdir(), `acaia-${id}.ass`);
-    const ovl = path.join(os.tmpdir(), `acaia-${id}-ov.png`);
-    await fs.writeFile(ass, lyricsAss(tl.lines, start, len, OW, OH, vertical));
-    if (overlayB64) await fs.writeFile(ovl, Buffer.from(overlayB64, "base64"));
-    const X = 0.6; // duração de cada transição
-    const TRANS = ["fade", "smoothleft", "fadeblack", "circleopen", "smoothup", "dissolve", "slideleft", "fade", "radial"];
-    const inputs = [], filters = [];
-    let k = 2; // 0: camada de cima, 1: áudio
-    manifest.scenes.forEach((sc, i) => {
-      const clip = path.join(sdir, `cena${i}.mp4`);
-      let img = path.join(sdir, `cena${i}.png`);
-      if (!existsSync(img)) img = path.join(sdir, `cena${manifest.scenes.findIndex((_, j) => existsSync(path.join(sdir, `cena${j}.png`)))}.png`);
-      const D = sc.dur + (i < total - 1 ? X : 0);
-      const base = `scale=${OW}:${OH}:force_original_aspect_ratio=increase,crop=${OW}:${OH},setsar=1`;
-      if (existsSync(clip)) {
-        // a cena (5 s) é levemente desacelerada para preencher o tempo; se faltar, segura o último quadro
-        const slow = Math.min(1.6, Math.max(1, D / 5.04));
-        inputs.push("-i", clip);
-        filters.push(`[${k}:v]setpts=${slow.toFixed(3)}*PTS,${base},fps=${FPS},tpad=stop_mode=clone:stop_duration=${Math.ceil(D)},trim=duration=${D.toFixed(2)},setpts=PTS-STARTPTS,format=yuv420p[s${i}]`);
-      } else {
-        // sem animação: aproximação lenta na imagem (movimento de câmera)
-        inputs.push("-loop", "1", "-framerate", String(FPS), "-t", D.toFixed(2), "-i", img);
-        filters.push(`[${k}:v]scale=${Math.round(OW * 1.18)}:${Math.round(OH * 1.18)}:force_original_aspect_ratio=increase,crop=${OW}:${OH}:x='(iw-ow)/2*(1-0.6*t/${D.toFixed(2)})':y='(ih-oh)/2',setsar=1,fps=${FPS},trim=duration=${D.toFixed(2)},setpts=PTS-STARTPTS,format=yuv420p[s${i}]`);
-      }
-      k++;
-    });
-    let lastLabel = "s0", acc = 0;
-    for (let i = 1; i < total; i++) {
-      acc += manifest.scenes[i - 1].dur;
-      filters.push(`[${lastLabel}][s${i}]xfade=transition=${TRANS[(i - 1) % TRANS.length]}:duration=${X}:offset=${acc.toFixed(2)}[x${i}]`);
-      lastLabel = `x${i}`;
-    }
-    filters.push(
-      `[0:v]scale=${OW}:${OH},format=rgba[ov]`,
-      `[${lastLabel}][ov]overlay=0:0,subtitles=filename='${filterPath(ass)}':fontsdir='${filterPath(FONTS)}',fade=t=in:st=0:d=0.8,fade=t=out:st=${len - 1}:d=1[bg]`,
-      `[1:a]atrim=0:${len},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1,afade=t=out:st=${len - 2}:d=2,aformat=channel_layouts=stereo[aout]`,
-      `color=c=white@0.18:s=${bar.w}x${bar.h}:r=${FPS}:d=${len},format=yuva420p[track]`,
-      `color=c=0xf9a8d4:s=${bar.w}x${bar.h}:r=${FPS}:d=${len}[fill]`,
-      `[track][fill]overlay=x='-w+w*t/${len}':y=0:shortest=1[barv]`,
-      `[bg][barv]overlay=${bar.x}:${bar.y}:shortest=1,format=yuv420p[vout]`,
-    );
-    const name = `video-${vertical ? "vertical" : "horizontal"}-${start}-historia.mp4`;
-    let lastPct = -1;
-    try {
-      await ffmpeg(
-        [
-          "-threads", "1", "-filter_complex_threads", "1",
-          "-loop", "1", "-framerate", String(FPS), "-t", String(len), "-i", overlayB64 ? ovl : path.join(sdir, "cena0.png"),
-          "-ss", String(start), "-t", String(len), "-i", path.join(SONGS_DIR, `${song.id}.mp3`),
-          ...inputs,
-          "-filter_complex", filters.join(";"),
-          "-map", "[vout]", "-map", "[aout]",
-          "-t", String(len), "-r", String(FPS),
-          "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27", "-threads", "1",
-          "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-          path.join(dir, name),
-        ],
-        20 * 60 * 1000,
-        (secs) => {
-          const pct = Math.min(99, Math.floor((secs / len) * 100));
-          if (pct !== lastPct) set({ status: "generating", message: `Montando a história animada… ${pct}%`, progress: Math.floor(72 + pct * 0.28) }), (lastPct = pct);
-        },
-      );
-    } finally {
-      fs.rm(ass, { force: true }).catch(() => {});
-      fs.rm(ovl, { force: true }).catch(() => {});
-    }
-    const animated = manifest.scenes.filter((_, i) => existsSync(path.join(sdir, `cena${i}.mp4`))).length;
-    return { url: `/audio/media/${song.id}/${name}`, animated, total, approximate: tl.approximate };
-  }
-
+  // ===== Vídeo "história animada": a letra contada em cenas animadas, com a letra discreta embaixo =====
+  // 1) linha do tempo da letra (Whisper) → 2) o trecho é dividido em cenas, nas trocas de verso →
+  // 3) a IA escreve o roteiro (mesmo estilo e personagens) → 4) cada cena vira imagem e depois
+  // animação na GPU (3 ao mesmo tempo) → 5) o ffmpeg junta as cenas com transições suaves, a letra
+  // acendendo palavra por palavra (pequena, embaixo), o título discreto e uma barra fina.
+  const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), "fonts");
+  const filterPath = (p) => p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+  const assTime = (s) => {
+    s = Math.max(0, s);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return `${h}:${String(m).padStart(2, "0")}:${sec.toFixed(2).padStart(5, "0")}`;
+  };
+  const assEsc = (t) => String(t).replace(/[{}\\]/g, "");
+  function lyricsAss(lines, start, len, OW, OH, vertical) {
+    const size = Math.round(vertical ? OW * 0.056 : OH * 0.05);
+    const head = [
+      "[Script Info]",
+      "ScriptType: v4.00+",
+      `PlayResX: ${OW}`,
+      `PlayResY: ${OH}`,
+      "WrapStyle: 0",
+      "ScaledBorderAndShadow: yes",
+      "",
+      "[V4+ Styles]",
+      "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+      `Style: Letra,Poppins SemiBold,${size},&H00FFFFFF,&H70FFFFFF,&H78000000,&H96000000,0,0,0,0,100,100,0.5,0,1,1.2,0.8,2,${Math.round(OW * 0.09)},${Math.round(OW * 0.09)},${Math.round(OH * (vertical ? 0.085 : 0.1))},1`,
+      "",
+      "[Events]",
+      "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ].join("\n");
+    const inWin = lines.filter((l) => l.end > start + 0.3 && l.t < start + len - 0.5);
+    const ev = inWin.map((l, i) => {
+      const a = Math.max(0, l.t - start - 0.3);
+      const nextT = inWin[i + 1] ? inWin[i + 1].t - start - 0.3 : len;
+      const b = Math.min(len - 0.2, Math.max(a + 1, Math.min(l.end - start + 0.8, nextT)));
+      // \kf: cada palavra acende suavemente no tempo em que é cantada
+      let txt = `{\\fad(220,220)}{\\k${Math.round(Math.max(0, l.t - start - a) * 100)}}`;
+      l.words.forEach((w, k) => {
+        const next = l.words[k + 1] ? l.words[k + 1][1] : w[2];
+        txt += `{\\kf${Math.max(5, Math.round((next - w[1]) * 100))}}${assEsc(w[0])}${k < l.words.length - 1 ? " " : ""}`;
+      });
+      return `Dialogue: 0,${assTime(a)},${assTime(b)},Letra,,0,0,0,,${txt}`;
+    });
+    return head + "\n" + ev.join("\n") + "\n";
+  }
+  // divide o trecho em cenas de ~7 s, cortando nas entradas dos versos
+  function storyScenes(lines, start, len, title) {
+    const n = Math.max(4, Math.min(9, Math.round(len / 7)));
+    const starts = lines.map((l) => l.t - start).filter((t) => t > 2 && t < len - 3);
+    const cuts = [0];
+    for (let k = 1; k < n; k++) {
+      const target = (k * len) / n;
+      const snap = starts.filter((t) => Math.abs(t - target) <= 2.5 && t - cuts.at(-1) >= 4).sort((x, y) => Math.abs(x - target) - Math.abs(y - target))[0];
+      const c = snap ?? target;
+      if (c - cuts.at(-1) >= 4 && len - c >= 4) cuts.push(Math.round(c * 100) / 100);
+    }
+    cuts.push(len);
+    return cuts.slice(0, -1).map((a, i) => {
+      const b = cuts[i + 1];
+      const text = lines.filter((l) => l.end - start > a + 0.5 && l.t - start < b - 0.5).map((l) => l.text).join(" / ");
+      return { a, b, dur: b - a, text: text || (i === 0 ? `abertura instrumental da música "${title}"` : `momento instrumental da música "${title}"`) };
+    });
+  }
+  async function pool(items, limit, fn) {
+    const out = new Array(items.length);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+          const i = next++;
+          out[i] = await fn(items[i], i).catch((e) => ({ error: e }));
+        }
+      }),
+    );
+    return out;
+  }
+  async function storyVideo({ song, b, set, job, vertical, start, len, OW, OH, FPS, bar, overlayB64, id }) {
+    const dir = MEDIA(song.id);
+    mkdirSync(dir, { recursive: true });
+    set({ status: "generating", message: "Ouvindo a música para sincronizar a letra…", progress: 2 });
+    const tl = await songTimeline(song);
+    const scenes = storyScenes(tl.lines, start, len, song.title);
+    const tag = vertical ? "v" : "h";
+    const key = `${tag}-${start}-${scenes.map((s) => s.text).join("|").length}-${scenes.length}`;
+    const sdir = path.join(dir, `historia-${key}`);
+    mkdirSync(sdir, { recursive: true });
+    const manifestFile = path.join(sdir, "cenas.json");
+    let manifest = existsSync(manifestFile) && !b.novo ? JSON.parse(await fs.readFile(manifestFile, "utf8")) : null;
+    if (!manifest || manifest.scenes?.length !== scenes.length) {
+      set({ status: "generating", message: "A IA está escrevendo o roteiro das cenas…", progress: 5 });
+      const o = song.options || {};
+      const board = await storyboard({ title: song.title, scenes: scenes.map((s) => s.text), mode: o.mode, moment: o.moment, season: o.season, genre: song.genre, moods: o.moods || [] });
+      manifest = { scenes: scenes.map((s, i) => ({ ...s, ...board[i] })) };
+      for (const old of await fs.readdir(sdir)) await fs.rm(path.join(sdir, old), { force: true });
+      await fs.writeFile(manifestFile, JSON.stringify(manifest));
+    }
+    // imagens e animações (as que já existem são reaproveitadas)
+    const began = Date.now();
+    // limite para a animação: se a GPU do Modal estiver em fila, não deixa a pessoa esperando
+    // meia hora; o que não ficou pronto até aqui sai com movimento de câmera na imagem
+    const LIMIT = 8 * 60 * 1000;
+    const until = began + LIMIT;
+    let done = 0;
+    const total = manifest.scenes.length;
+    const tick = setInterval(() => {
+      if (job?.canceled) return;
+      const ms = Date.now() - began, s = Math.round(ms / 1000);
+      const hint = s > 150 && done === 0 ? ` · a GPU está ocupada; em até ${Math.max(1, Math.ceil((LIMIT - ms) / 60000))} min sai de qualquer jeito` : " (uns 3 a 5 min na 1ª vez)";
+      // a barra anda pelo tempo também, para não parecer travada
+      set({ status: "generating", message: `Animando as cenas com IA: ${done} de ${total} prontas · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}${hint}`, progress: Math.min(70, 8 + Math.floor(Math.max((done / total) * 62, (ms / LIMIT) * 62))) });
+    }, 3000);
+    try {
+      await pool(manifest.scenes, 3, async (sc, i) => {
+        if (job?.canceled) return;
+        const img = path.join(sdir, `cena${i}.png`), clip = path.join(sdir, `cena${i}.mp4`);
+        if (!existsSync(img)) await fs.writeFile(img, await illustrate(sc.image));
+        if (!existsSync(clip) && Date.now() < until - 60000) {
+          try {
+            await fs.writeFile(clip, await animateCover(await fs.readFile(img), sc.motion, vertical ? "vertical" : "horizontal", { story: true, frames: 121, until }));
+          } catch (e) {
+            console.log(`História: a cena ${i + 1} ficou sem animação (vai com movimento de câmera):`, e.message);
+          }
+        }
+        done++;
+      });
+    } finally {
+      clearInterval(tick);
+    }
+    if (job?.canceled) throw new Error("cancelado");
+    if (!manifest.scenes.some((_, i) => existsSync(path.join(sdir, `cena${i}.png`)))) throw new Error("as imagens das cenas não foram criadas (o ilustrador está indisponível agora)");
+    // montagem
+    const ass = path.join(os.tmpdir(), `acaia-${id}.ass`);
+    const ovl = path.join(os.tmpdir(), `acaia-${id}-ov.png`);
+    await fs.writeFile(ass, lyricsAss(tl.lines, start, len, OW, OH, vertical));
+    if (overlayB64) await fs.writeFile(ovl, Buffer.from(overlayB64, "base64"));
+    const X = 0.6; // duração de cada transição
+    const TRANS = ["fade", "smoothleft", "fadeblack", "circleopen", "smoothup", "dissolve", "slideleft", "fade", "radial"];
+    const inputs = [], filters = [];
+    let k = 2; // 0: camada de cima, 1: áudio
+    manifest.scenes.forEach((sc, i) => {
+      const clip = path.join(sdir, `cena${i}.mp4`);
+      let img = path.join(sdir, `cena${i}.png`);
+      if (!existsSync(img)) img = path.join(sdir, `cena${manifest.scenes.findIndex((_, j) => existsSync(path.join(sdir, `cena${j}.png`)))}.png`);
+      const D = sc.dur + (i < total - 1 ? X : 0);
+      const base = `scale=${OW}:${OH}:force_original_aspect_ratio=increase,crop=${OW}:${OH},setsar=1`;
+      if (existsSync(clip)) {
+        // a cena (5 s) é levemente desacelerada para preencher o tempo; se faltar, segura o último quadro
+        const slow = Math.min(1.6, Math.max(1, D / 5.04));
+        inputs.push("-i", clip);
+        filters.push(`[${k}:v]setpts=${slow.toFixed(3)}*PTS,${base},fps=${FPS},tpad=stop_mode=clone:stop_duration=${Math.ceil(D)},trim=duration=${D.toFixed(2)},setpts=PTS-STARTPTS,format=yuv420p[s${i}]`);
+      } else {
+        // sem animação: aproximação lenta na imagem (movimento de câmera)
+        inputs.push("-loop", "1", "-framerate", String(FPS), "-t", D.toFixed(2), "-i", img);
+        filters.push(`[${k}:v]scale=${Math.round(OW * 1.18)}:${Math.round(OH * 1.18)}:force_original_aspect_ratio=increase,crop=${OW}:${OH}:x='(iw-ow)/2*(1-0.6*t/${D.toFixed(2)})':y='(ih-oh)/2',setsar=1,fps=${FPS},trim=duration=${D.toFixed(2)},setpts=PTS-STARTPTS,format=yuv420p[s${i}]`);
+      }
+      k++;
+    });
+    let lastLabel = "s0", acc = 0;
+    for (let i = 1; i < total; i++) {
+      acc += manifest.scenes[i - 1].dur;
+      filters.push(`[${lastLabel}][s${i}]xfade=transition=${TRANS[(i - 1) % TRANS.length]}:duration=${X}:offset=${acc.toFixed(2)}[x${i}]`);
+      lastLabel = `x${i}`;
+    }
+    filters.push(
+      `[0:v]scale=${OW}:${OH},format=rgba[ov]`,
+      `[${lastLabel}][ov]overlay=0:0,subtitles=filename='${filterPath(ass)}':fontsdir='${filterPath(FONTS)}',fade=t=in:st=0:d=0.8,fade=t=out:st=${len - 1}:d=1[bg]`,
+      `[1:a]atrim=0:${len},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1,afade=t=out:st=${len - 2}:d=2,aformat=channel_layouts=stereo[aout]`,
+      `color=c=white@0.18:s=${bar.w}x${bar.h}:r=${FPS}:d=${len},format=yuva420p[track]`,
+      `color=c=0xf9a8d4:s=${bar.w}x${bar.h}:r=${FPS}:d=${len}[fill]`,
+      `[track][fill]overlay=x='-w+w*t/${len}':y=0:shortest=1[barv]`,
+      `[bg][barv]overlay=${bar.x}:${bar.y}:shortest=1,format=yuv420p[vout]`,
+    );
+    const name = `video-${vertical ? "vertical" : "horizontal"}-${start}-historia.mp4`;
+    let lastPct = -1;
+    try {
+      await ffmpeg(
+        [
+          "-threads", "1", "-filter_complex_threads", "1",
+          "-loop", "1", "-framerate", String(FPS), "-t", String(len), "-i", overlayB64 ? ovl : path.join(sdir, "cena0.png"),
+          "-ss", String(start), "-t", String(len), "-i", path.join(SONGS_DIR, `${song.id}.mp3`),
+          ...inputs,
+          "-filter_complex", filters.join(";"),
+          "-map", "[vout]", "-map", "[aout]",
+          "-t", String(len), "-r", String(FPS),
+          "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27", "-threads", "1",
+          "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+          path.join(dir, name),
+        ],
+        20 * 60 * 1000,
+        (secs) => {
+          const pct = Math.min(99, Math.floor((secs / len) * 100));
+          if (pct !== lastPct) set({ status: "generating", message: `Montando a história animada… ${pct}%`, progress: Math.floor(72 + pct * 0.28) }), (lastPct = pct);
+        },
+      );
+    } finally {
+      fs.rm(ass, { force: true }).catch(() => {});
+      fs.rm(ovl, { force: true }).catch(() => {});
+    }
+    const animated = manifest.scenes.filter((_, i) => existsSync(path.join(sdir, `cena${i}.mp4`))).length;
+    // ?v=: o nome do arquivo se repete, então muda o endereço para o navegador não mostrar o vídeo antigo
+    return { url: `/audio/media/${song.id}/${name}?v=${Date.now()}`, animated, total, approximate: tl.approximate };
+  }
+
   // tom da música: tônica (0 = Dó) e se é menor
   function toneOf(s) {
     const raw = String(s.hearing?.key || s.chords?.key || s.options?.key || "").trim();
@@ -522,14 +536,19 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     bar.h = Math.max(2, even(bar.h));
     const half = wave.h / 2;
 
-    const { id, set } = newJob();
+    const { id, set, job } = newJob();
+    // entra na fila de criação (a pessoa pode fechar a janela e continuar usando o app)
+    trackTask({ id, label: `🎬 ${b.story ? "História animada" : "Vídeo"} · ${song.title}`, songId: song.id, kind: "video" });
     if (b.story) {
       videoChain = videoChain.then(async () => {
         try {
           // barra de progresso fina, colada na borda de baixo (discreta)
-          const r = await storyVideo({ song, b, set, vertical, start, len, OW, OH, FPS, bar: { x: 0, y: OH - 4, w: OW, h: 4 }, overlayB64: om?.[1], id });
+          const r = await storyVideo({ song, b, set, job, vertical, start, len, OW, OH, FPS, bar: { x: 0, y: OH - 4, w: OW, h: 4 }, overlayB64: om?.[1], id });
           const warn = r.animated < r.total ? ` (${r.total - r.animated} de ${r.total} cenas só com movimento de câmera)` : "";
-          set({ status: "done", message: `História animada pronta!${warn}`, url: r.url });
+          if (job.canceled) return;
+          // guarda na música: ao abrir de novo (ou recarregar a página) o vídeo continua lá
+          await saveField(song.id, { video: { url: r.url, at: new Date().toISOString() } }).catch(() => {});
+          set({ status: "done", message: `História animada pronta!${warn}`, url: r.url, songId: song.id });
         } catch (e) {
           console.error("Erro história animada:", e.message);
           set({ status: "error", error: "Não consegui montar a história animada: " + e.message.slice(0, 200) });
@@ -613,7 +632,9 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
             if (pct !== lastPct) set({ status: "generating", message: `Montando o vídeo${clipFile ? " com o clipe" : ""}… ${pct}%`, progress: Math.floor(p0 + (pct * (100 - p0)) / 100) }), (lastPct = pct);
           },
         );
-        const url = `/audio/media/${song.id}/${name}`;
+        const url = `/audio/media/${song.id}/${name}?v=${Date.now()}`;
+        if (job.canceled) return;
+        await saveField(song.id, { video: { url, at: new Date().toISOString() } }).catch(() => {});
         set({ status: "done", message: clipError ? `Vídeo pronto, com a imagem parada (o clipe não deu certo: ${clipError.slice(0, 120)})` : "Vídeo pronto!", url, clipError: clipError || undefined });
       } catch (e) {
         console.error("Erro vídeo:", e.message);

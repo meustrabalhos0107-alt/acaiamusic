@@ -45,7 +45,7 @@ def _ltx():
 
 @app.function(
     image=image,
-    gpu="L4",
+    gpu=["L4", "A10G", "L40S"],  # se faltar L4 (fila de espera no Modal), usa a próxima livre
     memory=32768,
     secrets=[modal.Secret.from_name("acaiamusic")],
     scaledown_window=60,
@@ -124,6 +124,13 @@ def gerar(item: dict):
 def clipe(item: dict):
     if item.get("key") != os.environ["ACESTEP_API_KEY"]:
         return {"error": "Chave incorreta."}
+    if item.get("cancel"):
+        # o app desistiu de esperar: não deixa a GPU gastando à toa
+        try:
+            modal.FunctionCall.from_id(str(item["cancel"])).cancel()
+        except Exception:
+            pass
+        return {"canceled": True}
     if item.get("call_id"):
         call = modal.FunctionCall.from_id(str(item["call_id"]))
         try:

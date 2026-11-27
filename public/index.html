@@ -1209,6 +1209,12 @@
           <button type="button" data-o="0"><b>✨ Letra criada pela IA</b><small>Uma letra nova inspirada no salmo e no Evangelho</small></button>
         </div>
       </div>
+      <div class="field">
+        <label>Momentos para criar <small class="muted" id="md-mom-n"></small>
+          <button type="button" class="btn ghost sm" id="md-mom-all" title="Marcar todos os momentos">Todos</button>
+          <button type="button" class="btn ghost sm" id="md-mom-none" title="Desmarcar todos os momentos">Nenhum</button></label>
+        <div class="md-moments" id="md-moments"><p class="muted small">Carregando os momentos…</p></div>
+      </div>
       <label class="md-check"><input type="checkbox" id="md-music" checked /> <span><b>Gravar as músicas também</b><small>Cada canto vira música com voz. Leva alguns minutos por canto (o estúdio grátis liga sozinho).</small></span></label>
       <div class="pane-actions"><button class="btn primary" id="md-go">✨ Montar a Missa</button></div>
     </div>
@@ -1262,7 +1268,8 @@
       <summary>❓ Ajuda</summary>
       <div class="set-row"><span><b>Modo ajuda</b><small>Ligado, tocar num botão só explica o que ele faz (o X das janelas continua fechando).</small></span>
         <label class="switch"><input type="checkbox" id="set-help" /><i></i></label></div>
-      <div class="set-row"><span><b>Explicação dos botões</b><small>Segure qualquer botão (ou pare o mouse em cima) para ler o que ele faz.</small></span><span class="set-note">sempre ativa</span></div>
+      <div class="set-row"><span><b>Explicação dos botões</b><small>Segure qualquer botão (ou pare o mouse em cima) para ler o que ele faz. Desligada, some também o botão ? das janelas.</small></span>
+        <label class="switch"><input type="checkbox" id="set-tips" /><i></i></label></div>
     </details>
 
     <details class="set-sec">

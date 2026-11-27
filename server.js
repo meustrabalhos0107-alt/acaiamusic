@@ -380,7 +380,10 @@ function friendlyAceError(msg = "") {
 // ---------- Fila de trabalhos ----------
 const jobs = new Map(); // id -> { status, message, queue, song, error }
 let chain = Promise.resolve(); // uma geração por vez
-const studio = registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, HF_TOKEN, songTimeline });
+// Outras tarefas que aparecem na fila de criação (vídeos do Status): andam em paralelo às músicas
+const sideTasks = new Map(); // id do trabalho -> { id, label, songId, kind, createdAt }
+const trackTask = (t) => sideTasks.set(t.id, { ...t, createdAt: Date.now() });
+const studio = registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, HF_TOKEN, songTimeline, trackTask });
 // tempo de cada verso e palavra (modo palco)
 app.get("/api/songs/:id/timeline", async (req, res) => {
   const song = (await loadSongs()).find((s) => s.id === req.params.id);
@@ -882,11 +885,29 @@ function songPct(j) {
   j.pctMax = Math.max(j.pctMax || 0, Math.min(99, Math.floor(p)));
   return j.pctMax;
 }
+// vídeos da fila: os que terminaram vão para o histórico (com o botão de abrir a música)
+function sideView() {
+  const out = [];
+  for (const [id, t] of sideTasks) {
+    const j = jobs.get(id);
+    if (!j || ["done", "error", "canceled"].includes(j.status)) {
+      sideTasks.delete(id);
+      history.unshift({ id, label: t.label, status: j?.status || "error", at: Date.now(), retry: false, songId: t.songId, kind: t.kind, ...(j?.error || !j ? { error: String(j?.error || "interrompido").slice(0, 160) } : {}) });
+      history.length = Math.min(history.length, 12);
+      continue;
+    }
+    const running = j.status !== "waiting";
+    out.push({ id, label: t.label, kind: t.kind, songId: t.songId, running, status: j.status, startedAt: t.createdAt, stageAt: 0, message: running ? j.message || "Montando…" : "Na fila de vídeos", tries: 1, maxTries: 1, retryAt: 0, progress: Math.round(j.progress || 0) });
+  }
+  return out;
+}
 const queueView = () => {
   const cur = currentTask && jobs.get(currentTask.id);
   const paused = queuePaused();
+  const side = sideView();
   return {
-    pending: queue.length,
+    pending: queue.length + side.length,
+    videos: side.length,
     paused,
     current: currentTask ? { id: currentTask.id, label: currentTask.label || currentTask.input.plan.title, message: cur?.message || "" } : null,
     items: queue.map((q) => {
@@ -905,7 +926,7 @@ const queueView = () => {
         retryAt: !running && q.notBefore > Date.now() ? q.notBefore : 0,
         progress: running ? songPct(j) : 0,
       };
-    }),
+    }).concat(side),
     history,
   };
 };
@@ -935,6 +956,12 @@ app.post("/api/queue/pause", async (req, res) => {
   res.json(queueView());
 });
 app.post("/api/queue/:id/cancel", (req, res) => {
+  const side = sideTasks.has(req.params.id) && jobs.get(req.params.id);
+  if (side) {
+    // vídeo: para de esperar a GPU e não salva o resultado
+    Object.assign(side, { canceled: true, status: "canceled", error: "Cancelado", updatedAt: Date.now() });
+    return res.json(queueView());
+  }
   const t = queue.find((q) => q.id === req.params.id);
   if (!t) return res.status(404).json({ error: "Essa música não está mais na fila." });
   const j = jobs.get(t.id) || jobs.set(t.id, { createdAt: Date.now() }).get(t.id);
@@ -1643,13 +1670,21 @@ app.post("/api/setlists/:id/record", async (req, res) => {
 });
 
 // ---------- Missa pronta do dia ----------
-app.get("/api/liturgy", async (req, res) => res.json(await getLiturgy(String(req.query.date || ""))));
+app.get("/api/liturgy", async (req, res) => {
+  const lit = await getLiturgy(String(req.query.date || ""));
+  // momentos da Missa deste dia (sem Glória no Advento/Quaresma etc.), para a pessoa escolher quais criar
+  res.json({ ...lit, moments: massPlan(lit).map((p) => p.moment) });
+});
 
 // Escreve todas as letras da Missa do dia (e, se pedido, grava as músicas), monta o repertório
 app.post("/api/mass-ready", async (req, res) => {
   const b = req.body || {};
   const lit = await getLiturgy(String(b.date || ""));
-  const plan = massPlan(lit, { original: b.original !== false });
+  const all = massPlan(lit, { original: b.original !== false });
+  // só os momentos escolhidos (sem escolha: todos)
+  const want = Array.isArray(b.moments) ? new Set(b.moments.map(String)) : null;
+  const plan = want ? all.filter((p) => want.has(p.moment)) : all;
+  if (!plan.length) return res.status(400).json({ error: "Escolha pelo menos um momento da Missa." });
   const withMusic = b.withMusic === true;
   const duration = Math.max(MIN_SECONDS, Math.min(240, Number(b.duration) || 120));
   const id = randomUUID();

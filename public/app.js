@@ -2356,6 +2356,10 @@ function openSong(song) {
   $("#video-actions").classList.add("hidden");
   $("#video-progress").classList.add("hidden");
   drawVideoPreview();
+  // o último vídeo feito fica guardado na música; e se um vídeo ainda está sendo montado, mostra o andamento
+  if (song.video?.url) song.lastVideo ||= song.video.url;
+  if (song.lastVideo) showVideoOut(song, song.lastVideo);
+  syncVideoJob(song);
 
   selectTab("letra");
   if (!dlg.open) dlg.showModal();
@@ -3684,14 +3688,42 @@ async function drawVideoPreview() {
   ctx.fillRect(bar.x, bar.y, bar.w * 0.35, bar.h);
   $(".video-preview").style.maxWidth = videoFormat === "vertical" ? "260px" : "100%";
 }
-$("#btn-video").onclick = async (e) => {
+// vídeos sendo montados, por música (continuam mesmo com a janela fechada; o número fica
+// guardado para retomar depois de recarregar a página)
+const videoJobs = new Map();
+const savedVideoJobs = () => JSON.parse(localStorage.getItem("acaia-video-jobs") || "{}");
+function rememberVideoJob(songId, jobId) {
+  const all = savedVideoJobs();
+  if (jobId) all[songId] = jobId;
+  else delete all[songId];
+  localStorage.setItem("acaia-video-jobs", JSON.stringify(all));
+}
+function showVideoOut(song, url) {
+  const v = $("#video-out");
+  if (v.getAttribute("src") !== url) v.src = url;
+  v.classList.remove("hidden");
+  $("#video-canvas").classList.add("hidden");
+  $("#dl-video").href = url;
+  $("#dl-video").download = `${safeName(song.title)} (status).mp4`;
+  $("#video-actions").classList.remove("hidden");
+}
+// mostra (ou esconde) o andamento do vídeo da música aberta
+function syncVideoJob(song) {
+  const vj = videoJobs.get(song.id);
+  if (!vj && savedVideoJobs()[song.id]) return followVideo(song, savedVideoJobs()[song.id]).catch((err) => toast(err.message, true, 8000));
+  $("#btn-video").disabled = Boolean(vj);
+  $("#video-progress").classList.toggle("hidden", !vj);
+  if (vj) {
+    $("#video-msg").textContent = vj.msg;
+    $("#video-bar").style.width = vj.pct + "%";
+  }
+}
+$("#btn-video").onclick = async () => {
   const song = dlgSong;
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  $("#video-progress").classList.remove("hidden");
+  if (videoJobs.has(song.id)) return;
+  videoJobs.set(song.id, { msg: "Desenhando a arte…", pct: 5 });
+  syncVideoJob(song);
   $("#video-actions").classList.add("hidden");
-  $("#video-msg").textContent = "Desenhando a arte…";
-  $("#video-bar").style.width = "5%";
   try {
     if (videoStyle === "historia") {
       const oc = document.createElement("canvas");
@@ -3702,6 +3734,7 @@ $("#btn-video").onclick = async (e) => {
         body: JSON.stringify({ story: true, novo: $("#story-new").checked, image: png, overlay: png, format: videoFormat, start: Number($("#video-start").value) }),
       });
       $("#story-new").checked = false;
+      videoQueued();
       return await followVideo(song, jobId);
     }
     const canvas = document.createElement("canvas");
@@ -3717,40 +3750,61 @@ $("#btn-video").onclick = async (e) => {
       method: "POST",
       body: JSON.stringify({ image: canvas.toDataURL("image/png"), overlay, format: videoFormat, start: Number($("#video-start").value), layout }),
     });
+    videoQueued();
     await followVideo(song, jobId);
   } catch (err) {
     toast(err.message, true, 8000);
   } finally {
-    btn.disabled = false;
-    $("#video-progress").classList.add("hidden");
+    videoJobs.delete(song.id);
+    if (dlgSong?.id === song.id) syncVideoJob(song);
   }
 };
-// acompanha a montagem do vídeo até ficar pronto
+// o vídeo entrou na fila de criação: a pessoa pode fechar a janela e continuar usando o app
+function videoQueued() {
+  toast("🎬 O vídeo entrou na fila de criação. Pode fechar e continuar usando o app: avisamos quando ficar pronto.", false, 7000);
+  refreshQueue();
+}
+// acompanha a montagem do vídeo até ficar pronto (mesmo com a janela fechada ou outra música aberta)
 async function followVideo(song, jobId) {
-  {
-    const t0 = Date.now();
+  const own = !videoJobs.has(song.id); // retomado depois de recarregar a página
+  videoJobs.set(song.id, { msg: "Montando o vídeo…", pct: 8 });
+  rememberVideoJob(song.id, jobId);
+  const ui = () => dlgSong?.id === song.id && $("#song-dialog").open;
+  if (ui()) syncVideoJob(song);
+  const t0 = Date.now();
+  try {
     for (;;) {
       await sleep(1500);
-      const job = await api(`/api/jobs/${jobId}`);
-      if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
+      let job;
+      try {
+        job = await api(`/api/jobs/${jobId}`);
+      } catch (err) {
+        // o servidor reiniciou ou esqueceu o trabalho: confere se o vídeo já ficou guardado na música
+        if (/não encontrado/i.test(err.message)) throw new Error("O vídeo foi interrompido (o servidor reiniciou). Toque em Criar de novo: as cenas já prontas são reaproveitadas.");
+        continue; // falha passageira de internet
+      }
+      if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Vídeo cancelado.");
       const vPct = job.status === "done" ? 100 : job.progress != null ? 8 + job.progress * 0.9 : Math.min(30, 5 + (Date.now() - t0) / 4000);
-      $("#video-msg").textContent = `${pctMsg(vPct, String(job.message || "").replace(/\s*\d+%$/, ""))} · ${fmt((Date.now() - t0) / 1000)}`;
-      $("#video-bar").style.width = vPct + "%";
+      const vj = videoJobs.get(song.id);
+      vj.msg = `${pctMsg(vPct, String(job.message || "").replace(/\s*\d+%$/, ""))} · ${fmt((Date.now() - t0) / 1000)}`;
+      vj.pct = vPct;
+      if (ui()) syncVideoJob(song);
       if (job.status === "done") {
         song.lastVideo = job.url;
+        song.video = { url: job.url, at: new Date().toISOString() };
+        const inList = state.songs?.find?.((s) => s.id === song.id);
+        if (inList && inList !== song) (inList.lastVideo = job.url), (inList.video = song.video);
         if (navigator.canShare) prepShareFile(job.url, `${safeName(song.title)}.mp4`, "video/mp4"); // pronto para "Postar no Status"
-        if (dlgSong?.id === song.id) {
-          const v = $("#video-out");
-          v.src = job.url;
-          v.classList.remove("hidden");
-          $("#video-canvas").classList.add("hidden");
-          $("#dl-video").href = job.url;
-          $("#dl-video").download = `${safeName(song.title)} (status).mp4`;
-          $("#video-actions").classList.remove("hidden");
-        }
-        toast(/cenas só com movimento/.test(job.message || "") ? `🎬 ${job.message}` : "🎬 Vídeo pronto!", false, 6000);
+        if (ui()) showVideoOut(song, job.url);
+        toast(/cenas só com movimento/.test(job.message || "") ? `🎬 ${job.message}` : `🎬 Vídeo de “${song.title}” pronto!`, false, 6000);
         break;
       }
+    }
+  } finally {
+    rememberVideoJob(song.id, null);
+    if (own) {
+      videoJobs.delete(song.id);
+      if (ui()) syncVideoJob(song);
     }
   }
 }
@@ -4185,7 +4239,7 @@ function renderQueue(q) {
       : (() => {
           const run = q.items?.find((i) => i.running);
           const st = run ? `${Q_STAGES[qStage(run.status)].label}${run.stageAt ? " " + mmss(Date.now() - run.stageAt) : ""}` : "";
-          return `🎵 ${run ? `${run.progress || 0}% · ` : ""}${q.pending > 1 ? `${q.pending} músicas · ` : ""}${st || "Na fila"}${q.current ? ` · ${q.current.label}` : ""}`;
+          return `${run?.kind === "video" ? "🎬" : "🎵"} ${run ? `${run.progress || 0}% · ` : ""}${q.pending > 1 ? `${q.pending} na fila · ` : ""}${st || "Na fila"}${q.current ? ` · ${q.current.label}` : ""}`;
         })();
     pill.title = `${q.current?.message || "Na fila"}\nToque para pausar, cancelar ou ver a fila.`;
   }
@@ -4199,24 +4253,24 @@ function renderQueue(q) {
           const wait = it.retryAt ? ` · nova tentativa às ${new Date(it.retryAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "";
           const tries = it.tries > 1 || it.retryAt ? ` · tentativa ${Math.min(it.tries + (it.running ? 0 : 1), it.maxTries)} de ${it.maxTries}` : "";
           return `<li class="${it.running ? "run" : ""}" data-id="${esc(it.id)}">
-            <span>${it.running ? "🎙️" : k + 1 + "."}</span>
-            <div class="qd-info"><b>${qLabel(it.label)}${it.running ? `<span class="qd-pct">${it.progress || 0}%</span>` : ""}</b>${it.running ? `<div class="progress qd-bar"><div style="width:${Math.max(2, it.progress || 0)}%"></div></div>` + stagesHtml(it) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
-            <div class="qd-act">
+            <span>${it.kind === "video" ? "🎬" : it.running ? "🎙️" : k + 1 + "."}</span>
+            <div class="qd-info"><b>${qLabel(it.label)}${it.running ? `<span class="qd-pct">${it.progress || 0}%</span>` : ""}</b>${it.running ? `<div class="progress qd-bar"><div style="width:${Math.max(2, it.progress || 0)}%"></div></div>` + (it.kind === "video" ? "" : stagesHtml(it)) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
+            <div class="qd-act">${it.kind === "video" ? `<button class="btn ghost" data-open="${esc(it.songId)}" data-video="1" title="Abrir a música na aba do vídeo">Abrir</button><button class="btn ghost danger" data-q="cancel">Cancelar</button>` : `
               ${!it.running && (it.retryAt || k > 0) ? `<button class="btn ghost" data-q="now" title="Passar para a frente e tentar já">Agora</button>` : ""}
               ${!it.running && k > 0 && !q.items[k - 1].running ? `<button class="btn ghost" data-q="up" aria-label="Subir na fila" title="Subir">↑</button>` : ""}
               ${!it.running && k < q.items.length - 1 ? `<button class="btn ghost" data-q="down" aria-label="Descer na fila" title="Descer">↓</button>` : ""}
               ${!it.running ? `<button class="btn ghost" data-q="edit" title="Mudar título e letra antes de gravar">✎ Editar</button>` : ""}
-              <button class="btn ghost danger" data-q="cancel">Cancelar</button>
+              <button class="btn ghost danger" data-q="cancel">Cancelar</button>`}
             </div></li>`;
         })
         .join("")
-    : `<li class="qd-empty">Nenhuma música na fila agora.</li>`;
+    : `<li class="qd-empty">Nada na fila agora.</li>`;
   const hist = q.history || [];
   $("#qd-hist-title").classList.toggle("hidden", !hist.length);
   $("#qd-hist").innerHTML = hist
     .map(
       (h) => `<li data-id="${esc(h.id)}"><span>${Q_ICON[h.status] || "•"}</span><div class="qd-info"><b>${esc(h.label)}</b><small>${Q_WORD[h.status] || h.status} · ${new Date(h.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${h.error ? " · " + esc(h.error) : ""}</small></div><div class="qd-act">${
-        h.songId ? `<button class="btn ghost" data-open="${esc(h.songId)}">Ouvir</button>` : ""
+        h.songId ? `<button class="btn ghost" data-open="${esc(h.songId)}"${h.kind === "video" ? ` data-video="1">Ver vídeo` : ">Ouvir"}</button>` : ""
       }${h.retry ? `<button class="btn ghost" data-h="retry" title="Pôr de volta na fila">↻ Tentar de novo</button>` : ""}<button class="btn ghost" data-h="del" aria-label="Tirar do histórico" title="Tirar do histórico">✕</button></div></li>`,
     )
     .join("");
@@ -4283,6 +4337,13 @@ $("#qd-pause").onclick = async (e) => {
 $("#queue-dialog").addEventListener("click", async (e) => {
   const open = e.target.closest("[data-open]");
   if (open) {
+    if (open.dataset.video) {
+      // vídeo: abre a música direto na aba do vídeo (com o vídeo pronto, se já terminou)
+      await loadSongs().catch(() => {});
+      const song = state.songs.find((s) => s.id === open.dataset.open);
+      if (song) ($("#queue-dialog").close(), openSong(song), selectTab("video"));
+      return;
+    }
     const song = state.songs.find((s) => s.id === open.dataset.open);
     if (song) ($("#queue-dialog").close(), play(song), openSong(song));
     return;
@@ -4417,10 +4478,35 @@ async function paintMassDialog() {
         ${R.second ? `<dt>2ª Leitura</dt><dd>${esc(R.second.ref)}</dd>` : ""}
         ${R.gospel ? `<dt>Evangelho</dt><dd>${esc(R.gospel.ref)}</dd>` : ""}
       </dl>`;
+    paintMassMoments(L.moments || []);
   } catch {
     box.innerHTML = `<p class="muted small">Não consegui carregar a liturgia agora. Confira a internet e tente de novo.</p>`;
   }
 }
+// momentos da Missa: todos vêm marcados; os que a pessoa desmarca ficam guardados para as próximas
+const mdSkipped = () => new Set(JSON.parse(localStorage.getItem("acaia-mass-skip") || "[]"));
+function countMassMoments() {
+  const boxes = $$("#md-moments input");
+  const n = boxes.filter((c) => c.checked).length;
+  $("#md-mom-n").textContent = boxes.length ? `${n} de ${boxes.length}` : "";
+  $("#md-go").disabled = boxes.length > 0 && n === 0;
+}
+function saveMassMoments() {
+  const skip = mdSkipped();
+  $$("#md-moments input").forEach((c) => (c.checked ? skip.delete(c.value) : skip.add(c.value)));
+  localStorage.setItem("acaia-mass-skip", JSON.stringify([...skip]));
+  countMassMoments();
+}
+function paintMassMoments(moments) {
+  const skip = mdSkipped();
+  $("#md-moments").innerHTML = moments.length
+    ? moments.map((m) => `<label class="md-mom"><input type="checkbox" value="${esc(m)}" ${skip.has(m) ? "" : "checked"} /> <span>${esc(m)}</span></label>`).join("")
+    : `<p class="muted small">Todos os momentos da Missa serão criados.</p>`;
+  $$("#md-moments input").forEach((c) => (c.onchange = saveMassMoments));
+  countMassMoments();
+}
+$("#md-mom-all").onclick = () => ($$("#md-moments input").forEach((c) => (c.checked = true)), saveMassMoments());
+$("#md-mom-none").onclick = () => ($$("#md-moments input").forEach((c) => (c.checked = false)), saveMassMoments());
 $("#md-genre").innerHTML = GENRES["Católica"].map(([n], i) => `<option value="${i}">${esc(n)}</option>`).join("");
 $("#md-voice").innerHTML = VOICE_TYPES.filter(([n]) => n !== "Instrumental").map(([n], i) => `<option value="${i}">${esc(n)}</option>`).join("");
 $("#mass-open").onclick = () => {
@@ -4438,12 +4524,15 @@ $("#md-go").onclick = async () => {
   const [vName, vTags] = VOICE_TYPES.filter(([n]) => n !== "Instrumental")[$("#md-voice").value];
   const withMusic = $("#md-music").checked;
   const original = $("#md-original .on")?.dataset.o !== "0";
+  const boxes = $$("#md-moments input");
+  const moments = boxes.length ? boxes.filter((c) => c.checked).map((c) => c.value) : undefined;
+  if (moments && !moments.length) return toast("Marque pelo menos um momento da Missa.", true);
   $("#md-setup").classList.add("hidden");
   $("#md-run").classList.remove("hidden");
   $("#md-done").classList.add("hidden");
   $("#md-bar").style.width = "3%";
   try {
-    const { jobId } = await api("/api/mass-ready", { method: "POST", body: JSON.stringify({ date: mdDate, genre: gName, genreTags: gTags, voice: vName, voiceTags: vTags, withMusic, original, duration: 120 }) });
+    const { jobId } = await api("/api/mass-ready", { method: "POST", body: JSON.stringify({ date: mdDate, genre: gName, genreTags: gTags, voice: vName, voiceTags: vTags, withMusic, original, moments, duration: 120 }) });
     for (;;) {
       await sleep(2500);
       const j = await api(`/api/jobs/${jobId}`);
@@ -5349,6 +5438,8 @@ function paintSettings() {
   $("#set-range").textContent = r?.low && r?.high ? `${midiName(r.low)} a ${midiName(r.high)}` : "não medida";
   $("#set-stage-size").textContent = `${Math.round((stage.size || 1) * 100)}%`;
   $("#set-help").checked = document.body.classList.contains("help-mode");
+  $("#set-tips").checked = !document.body.classList.contains("tips-off");
+  $("#set-help").disabled = !$("#set-tips").checked;
   $("#set-author").value = localStorage.getItem("acaia-autor") || "";
 }
 $("#btn-settings").addEventListener("click", paintSettings);
@@ -5371,6 +5462,7 @@ $("#set-stage-plus").onclick = () => stageStep(0.15);
 $("#set-help").onchange = (e) => {
   if (e.target.checked !== document.body.classList.contains("help-mode")) $("#help-toggle")?.click();
 };
+$("#set-tips").onchange = (e) => (window.setTips?.(e.target.checked), paintSettings());
 $("#set-author").onchange = (e) => localStorage.setItem("acaia-autor", e.target.value.trim());
 $("#set-refresh").onclick = async () => {
   try {
