@@ -219,8 +219,8 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
             const began = Date.now();
             const tick = setInterval(() => {
               const s = Math.round((Date.now() - began) / 1000);
-              // de 0 a 60%: a GPU criando o clipe (estimativa de ~6 min, contando o estúdio ligar)
-              set({ status: "generating", message: `Criando o clipe animado da capa com IA… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} (1 min com o estúdio ligado; até ~10 min se estiver desligado)`, progress: Math.min(60, Math.floor((s / 360) * 60)) });
+              // de 0 a 60%: a GPU criando o clipe (estimativa de ~2 min, contando a GPU ligar)
+              set({ status: "generating", message: `Criando o clipe animado da capa com IA… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} (leva de 1 a 2 min)`, progress: Math.min(60, Math.floor((s / 120) * 60)) });
             }, 3000);
             try {
               const vid = await animateCover(await fs.readFile(path.join(dir, ill.file)), ill.prompt || song.title, vertical ? "vertical" : "horizontal");
