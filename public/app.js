@@ -1441,6 +1441,7 @@ function renderAlbumDetail(box, a) {
           <button class="btn ghost" data-act="shuffle">🔀 Aleatório</button>
           <button class="btn ghost" data-act="add">＋ Músicas</button>
           <button class="btn ghost" data-act="edit">✎ Editar</button>
+          <button class="btn ghost" data-act="merge" title="Traz as músicas de outros álbuns para este (sem repetir); depois você escolhe se apaga os outros">🧩 Juntar álbuns</button>
           <button class="btn ghost" data-act="share">🔗 Compartilhar</button>
           <button class="btn ghost danger" data-act="delete">Excluir</button>
         </div>
@@ -1467,6 +1468,7 @@ function renderAlbumDetail(box, a) {
     edit: () => editAlbum(a),
     share: () => shareAlbum(a),
     delete: () => deleteAlbum(a),
+    merge: () => mergeAlbums(a),
   };
   $$("[data-act]", box).forEach((b) => (b.onclick = () => acts[b.dataset.act]()));
   $$(".alb-tracks li", box).forEach((li) => {
@@ -1482,6 +1484,33 @@ function renderAlbumDetail(box, a) {
       if (b.dataset.op === "down" && k < ids.length - 1) [ids[k + 1], ids[k]] = [ids[k], ids[k + 1]];
       saveAlbum(a, { songIds: ids });
     }));
+  });
+}
+// Juntar álbuns: escolhe os outros, as músicas vêm para este e pergunta se apaga os outros
+function mergeAlbums(a) {
+  const others = state.albums.filter((x) => x.id !== a.id);
+  if (!others.length) return toast("Você só tem este álbum. Crie outro para poder juntar.");
+  openPicker({
+    eyebrow: "🧩 Juntar em “" + a.title + "”",
+    title: "Quais álbuns juntar a este?",
+    items: others.map((x) => ({ id: x.id, label: x.title, sub: `${albumSongs(x).length} música(s)${x.setlistId ? " · álbum da Missa" : ""}` })),
+    onSave: async (set) => {
+      const from = [...set];
+      if (!from.length) return;
+      const names = others.filter((x) => set.has(x.id)).map((x) => `“${x.title}”`).join(", ");
+      const novas = new Set(others.filter((x) => set.has(x.id)).flatMap((x) => x.songIds).filter((id) => !a.songIds.includes(id))).size;
+      const remove = confirm(`As músicas de ${names} vão para “${a.title}” (${novas} nova(s), sem repetir).\n\nApagar ${from.length > 1 ? "os álbuns que foram juntados" : "o álbum que foi juntado"}?\n\nOK = apagar · Cancelar = manter ${from.length > 1 ? "os dois" : "também"}\n(as músicas nunca são apagadas, só o álbum)`);
+      try {
+        const r = await api(`/api/albums/${a.id}/merge`, { method: "POST", body: JSON.stringify({ from, remove }) });
+        state.albums = state.albums.filter((x) => !r.removed.includes(x.id)).map((x) => (x.id === r.album.id ? r.album : x));
+        $("#alb-count").textContent = state.albums.length || "";
+        state.albumOpen = r.album.id;
+        renderAlbums();
+        toast(`🧩 Álbuns juntados: “${r.album.title}” agora tem ${r.album.songIds.length} música(s).`, false, 5000);
+      } catch (e) {
+        toast(e.message, true);
+      }
+    },
   });
 }
 async function saveAlbum(a, patch) {

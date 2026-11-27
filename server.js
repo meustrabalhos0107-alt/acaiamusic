@@ -1501,6 +1501,27 @@ app.put("/api/albums/:id", async (req, res) => {
   if (!updated) return res.status(404).json({ error: "Álbum não encontrado." });
   res.json(updated);
 });
+// Juntar álbuns: as músicas dos outros vêm para este (na ordem, sem repetir); os outros podem
+// ser apagados ou ficar como estão
+app.post("/api/albums/:id/merge", async (req, res) => {
+  const from = (Array.isArray(req.body?.from) ? req.body.from : []).map(String).filter((x) => x !== req.params.id);
+  const remove = req.body?.remove === true;
+  if (!from.length) return res.status(400).json({ error: "Escolha pelo menos um álbum para juntar." });
+  const ids = new Set((await loadSongs()).map((s) => s.id));
+  let target = null;
+  await updateAlbums((db) => {
+    const t = db.albums.find((a) => a.id === req.params.id);
+    if (!t) return db;
+    const sources = from.map((id) => db.albums.find((a) => a.id === id)).filter(Boolean);
+    const songIds = [...new Set([...t.songIds, ...sources.flatMap((a) => a.songIds)])].filter((x) => ids.has(x)).slice(0, 300);
+    target = { ...t, songIds, removed: (t.removed || []).filter((x) => !songIds.includes(x)), updatedAt: new Date().toISOString() };
+    const gone = new Set(remove ? sources.map((a) => a.id) : []);
+    const dismissed = [...new Set([...db.dismissed, ...sources.filter((a) => gone.has(a.id) && a.setlistId).map((a) => a.setlistId)])];
+    return { albums: db.albums.filter((a) => !gone.has(a.id)).map((a) => (a.id === t.id ? target : a)), dismissed };
+  });
+  if (!target) return res.status(404).json({ error: "Álbum não encontrado." });
+  res.json({ album: target, removed: remove ? from : [] });
+});
 app.delete("/api/albums/:id", async (req, res) => {
   await updateAlbums((db) => {
     const a = db.albums.find((x) => x.id === req.params.id);
