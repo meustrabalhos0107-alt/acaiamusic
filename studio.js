@@ -128,8 +128,10 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
   let stemChain = Promise.resolve();
   let videoChain = Promise.resolve();
 
-  const newJob = () => {
+  // meta (opcional): { label, songId } — a tarefa aparece na fila de criação enquanto roda
+  const newJob = (meta) => {
     const id = randomUUID();
+    if (meta) queueMicrotask(() => trackTask({ id, kind: "task", ...meta }));
     const job = { status: "waiting", message: "Aguardando…", createdAt: Date.now() };
     jobs.set(id, job);
     // cancelado pela fila: não atualiza mais (e as etapas seguintes são puladas)
@@ -147,7 +149,7 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     const song = (await loadSongs()).find((s) => s.id === req.params.id);
     if (!song) return res.status(404).json({ error: "Música não encontrada." });
     if (song.stems) return res.json({ done: true, song });
-    const { id, set } = newJob();
+    const { id, set } = newJob({ label: `🎚️ Separar as faixas · ${song.title}`, songId: song.id });
     stemChain = stemChain.then(async () => {
       try {
         set({ status: "generating", message: "Enviando para o separador de IA…" });
@@ -422,7 +424,7 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     const songs = ids.map((id) => all.find((s) => s.id === id)).filter(Boolean);
     if (songs.length < 2) return res.status(400).json({ error: "Escolha de 2 a 4 músicas para o medley." });
     const seconds = int(b.seconds, 20, 90, 45);
-    const { id, set } = newJob();
+    const { id, set } = newJob({ label: "🎶 Medley" });
     videoChain = videoChain.then(async () => {
       const tmp = [];
       try {
@@ -736,7 +738,7 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     if (duet && !tone) return res.status(400).json({ error: "Não sei o tom desta música para fazer a 2ª voz. Gere a cifra (aba Cifra) e tente de novo." });
     const ext = m[1].includes("webm") ? "webm" : m[1].includes("ogg") ? "ogg" : m[1].includes("mp4") || m[1].includes("aac") ? "m4a" : "wav";
 
-    const { id, set } = newJob();
+    const { id, set } = newJob({ label: `🎤 Minha voz · ${song.title}`, songId: song.id });
     karaokeChain = karaokeChain.then(async () => {
       const newId = randomUUID();
       const dir = MEDIA(newId);
@@ -812,7 +814,7 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     if (!TUNE_LABEL[to]) return res.status(400).json({ error: "Escolha a afinação." });
     const from = song.spec?.tuning || "440";
     if (to === from) return res.status(400).json({ error: `Esta música já está em ${TUNE_LABEL[to]}.` });
-    const { id, set } = newJob();
+    const { id, set } = newJob({ label: `🎵 Afinação · ${song.title}`, songId: song.id });
     editChain = editChain.then(async () => {
       const newId = randomUUID();
       try {
@@ -871,7 +873,7 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     if (start === 0 && end >= dur && !fadeIn && !fadeOut && !semitones && tempo === 1 && !master)
       return res.status(400).json({ error: "Nenhuma alteração escolhida." });
 
-    const { id, set } = newJob();
+    const { id, set } = newJob({ label: `✂️ Edição do áudio · ${song.title}`, songId: song.id });
     editChain = editChain.then(async () => {
       try {
         set({ status: "generating", message: "Editando o áudio…" });

@@ -977,6 +977,9 @@ dialog.lyric-open { width: min(720px, 96vw); }
   #print-area { position: absolute; inset: 0; color: #000; background: #fff; padding: 20px; font-family: var(--mono); }
   #print-area h1 { font-family: sans-serif; }
   #print-area .ch { color: #000; font-weight: 700; }
+  /* o resto da página some de verdade (só escondido, ainda ocupava folhas em branco) */
+  body:has(#print-area) > *:not(#print-area) { display: none !important; }
+  body:has(#print-area) #print-area { position: static; }
 }
 details.manual { margin: 6px 0 12px; font-size: 0.85rem; }
 details.manual summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }

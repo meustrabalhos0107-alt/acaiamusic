@@ -917,29 +917,56 @@ async function generateLyrics(btn) {
     $("#idea").focus();
     return toast("Escreva o tema do canto ou cole a leitura do dia.");
   }
-  const old = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = OFFICIAL.has(o.moment) && o.mode === "catolica" ? "Preparando…" : "✍️ Compondo a letra…";
+  // a letra é composta na fila de criação: a tela fica livre (dá para sair do estúdio e voltar)
+  const myTurn = ++lyricTurn;
+  let jobId;
   try {
-    state.lastOptions = o;
-    const plan = await api("/api/lyrics", {
+    ({ jobId } = await api("/api/lyrics", {
       method: "POST",
-      body: JSON.stringify({ idea, ...o, language: $("#language").value, duration: Number($("#duration").value) }),
-    });
-    plan.cover = Math.floor(Math.random() * 1e6);
-    showPlan(plan);
-    // mostra como o texto livre foi entendido
-    const ip = plan.ideaParts;
-    if (ip && (ip.melody || ip.music)) {
-      const bits = [ip.lyrics && `✍️ Letra: ${ip.lyrics}`, ip.melody && `🎵 Melodia: ${ip.melody}`, ip.music && `🎸 Música: ${ip.music}`].filter(Boolean);
-      toast(`Entendi o seu pedido assim:\n${bits.join("\n")}`, false, 9000);
+      body: JSON.stringify({ idea, ...o, language: $("#language").value, duration: Number($("#duration").value), background: true }),
+    }));
+  } catch (e) {
+    return handleLyricsError(e);
+  }
+  lyricJobs.set(jobId, o);
+  toast("✍️ A letra entrou na fila de criação. Pode continuar usando o app: ela aparece no Estúdio quando ficar pronta.", false, 5000);
+  refreshQueue();
+  try {
+    for (;;) {
+      await sleep(2000);
+      let j;
+      try {
+        j = await api(`/api/jobs/${jobId}`);
+      } catch (err) {
+        if (/não encontrado/i.test(err.message)) throw new Error("A composição da letra foi interrompida (o servidor reiniciou). Toque em Compor de novo.");
+        continue;
+      }
+      if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Letra cancelada.");
+      if (j.status !== "done") continue;
+      // se a pessoa pediu outra letra depois desta, esta fica guardada no histórico da fila
+      if (myTurn !== lyricTurn) return toast(`📝 Letra “${j.plan.title}” pronta (abra pela fila de criação).`, false, 6000);
+      openLyricResult(j.plan, o);
+      break;
     }
   } catch (e) {
-    handleLyricsError(e);
+    toast(e.message, true, 7000);
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = old;
     updateOfficial();
+  }
+}
+let lyricTurn = 0;
+const lyricJobs = new Map(); // jobId -> opções usadas (para abrir a letra pronta pelo histórico da fila)
+function openLyricResult(plan, o) {
+  state.lastOptions = o || state.lastOptions || musicOptions();
+  plan.cover ??= Math.floor(Math.random() * 1e6);
+  showPlan(plan);
+  const inStudio = $("#view-create")?.classList.contains("active");
+  toast(inStudio ? `📝 Letra pronta: “${plan.title}”` : `📝 Letra “${plan.title}” pronta! Está no Estúdio.`, false, 6000);
+  // mostra como o texto livre foi entendido
+  const ip = plan.ideaParts;
+  if (ip && (ip.melody || ip.music)) {
+    const bits = [ip.lyrics && `✍️ Letra: ${ip.lyrics}`, ip.melody && `🎵 Melodia: ${ip.melody}`, ip.music && `🎸 Música: ${ip.music}`].filter(Boolean);
+    toast(`Entendi o seu pedido assim:\n${bits.join("\n")}`, false, 9000);
   }
 }
 $("#btn-lyrics").onclick = (e) => generateLyrics(e.currentTarget);
@@ -1167,14 +1194,16 @@ function bindCards(box) {
 }
 
 // ---------------- Minhas letras ----------------
-state.lyricsLib = [];
+state.lyricsLib = []; // as que aparecem em "Minhas letras"
+state.lyricsAll = []; // também as excluídas que um repertório ainda usa
 state.libMode = "songs";
 async function loadLyricsLib() {
   try {
-    state.lyricsLib = await api("/api/lyrics-lib");
+    state.lyricsAll = await api("/api/lyrics-lib");
   } catch {
-    state.lyricsLib = [];
+    state.lyricsAll = [];
   }
+  state.lyricsLib = state.lyricsAll.filter((l) => !l.deleted);
   countLyrics();
 }
 // "Minhas letras" abre nas que a pessoa salvou; as da Missa pronta/Terço ficam num filtro à parte
@@ -1760,7 +1789,7 @@ function slResolve(it) {
     return s && { title: s.title, sections: s.sections || [], chordSecs: s.chords?.sections || null, song: s };
   }
   if (it.kind === "lyric") {
-    const l = state.lyricsLib.find((x) => x.id === it.ref);
+    const l = state.lyricsLib.find((x) => x.id === it.ref) || state.lyricsAll.find((x) => x.id === it.ref);
     return l && { title: l.title, sections: textToSections(l.text), chordSecs: extractChords(l.text)?.sections || null };
   }
   return null;
@@ -1963,26 +1992,107 @@ $("#sl-play").onclick = () => {
   toast(`▶ Tocando ${songs.length} canto(s) em sequência`, false, 2500);
 };
 const slDate = (d) => (d ? new Date(d + "T12:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : "");
-$("#sl-print").onclick = () => {
-  const data = slCollect();
-  const withChords = $("#sl-chords").checked;
-  const body = data.items
-    .map((it) => {
-      const r = slResolve(it);
-      if (!r) return "";
-      const content =
-        withChords && r.chordSecs
-          ? r.chordSecs.map((s) => `<p class="mom">${esc(s.name)}</p><pre>${s.lines.map((l) => { const c = chordLine(l, 0); return (c.top ? c.html + "\n" : "") + esc(c.lyric); }).join("\n")}</pre>`).join("")
-          : r.sections.map((s) => `<p class="mom">${esc(s.name)}</p><pre>${esc(s.lines.join("\n"))}</pre>`).join("");
-      return `<div class="sl-print-item"><p class="mom">${esc(it.moment)}</p><h3>${esc(r.title)}</h3>${content}</div>`;
+// Folheto do repertório: abre numa página própria, pronta para imprimir ou salvar em PDF.
+// (Antes o conteúdo era apagado logo depois do print(): no celular e no app instalado o
+// print() não espera, e o folheto saía em branco.) Cifras que faltam são criadas na hora.
+async function slChordsFor(it, r) {
+  if (r.chordSecs?.length) return r.chordSecs;
+  if (!r.sections?.some((s) => s.lines.length)) return null;
+  try {
+    if (it.kind === "song" && r.song) {
+      const ch = await api(`/api/songs/${r.song.id}/chords`, { method: "POST", body: JSON.stringify({ source: "ia" }) });
+      r.song.chords = ch; // fica guardada na música
+      return ch.sections || null;
+    }
+    const ch = await api("/api/chords", { method: "POST", body: JSON.stringify({ sections: r.sections, mode: "catolica" }) });
+    return ch.sections || null;
+  } catch {
+    return null; // sem cifra: o canto sai só com a letra
+  }
+}
+function slBookletHtml(data, parts) {
+  const pre = (lines) => `<pre>${lines.join("\n")}</pre>`;
+  const items = parts
+    .map(({ it, r, chords }, i) => {
+      const secs = chords
+        ? chords.map((s) => `<div class="sec"><span class="tag">${esc(s.name)}</span>${pre(s.lines.map((l) => {
+            const c = chordLine(l, 0);
+            return (c.top ? `<b class="ch">${esc(c.top)}</b>\n` : "") + esc(c.lyric);
+          }))}</div>`).join("")
+        : r.sections.filter((s) => s.lines.length).map((s) => `<div class="sec"><span class="tag">${esc(s.name)}</span>${pre(s.lines.map(esc))}</div>`).join("");
+      return `<article><header><span class="n">${i + 1}</span><div><p class="mom">${esc(it.moment)}</p><h2>${esc(r.title)}</h2></div></header>${secs}</article>`;
     })
     .join("");
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(data.title)} · Folheto</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  @page{size:A4;margin:14mm}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Inter,system-ui,sans-serif;color:#1c1726;background:#f4f1f8;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .bar{position:sticky;top:0;display:flex;gap:8px;justify-content:center;padding:10px;background:#1c1129}
+  .bar button{font:inherit;font-weight:600;padding:9px 18px;border-radius:999px;border:0;cursor:pointer;background:linear-gradient(135deg,#7c3aed,#ec4899);color:#fff}
+  .bar button.ghost{background:transparent;border:1px solid rgba(255,255,255,.3)}
+  main{max-width:820px;margin:22px auto;background:#fff;border-radius:16px;padding:36px 44px;box-shadow:0 18px 50px -24px rgba(60,20,100,.35)}
+  .top{text-align:center;border-bottom:2px solid #f3ecff;padding-bottom:18px;margin-bottom:22px}
+  .top small{letter-spacing:.28em;text-transform:uppercase;color:#a855f7;font-weight:700;font-size:.7rem}
+  .top h1{margin:6px 0 4px;font-family:"Palatino Linotype",Palatino,Georgia,serif;font-size:2rem;font-weight:600}
+  .top p{margin:2px 0;color:#5d5670}
+  article{break-inside:avoid-page;margin:0 0 26px;padding-bottom:18px;border-bottom:1px dashed #e7e1f0}
+  article:last-child{border-bottom:0}
+  article header{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+  .n{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#ec4899);color:#fff;font-weight:700;font-size:.85rem}
+  .mom{margin:0;font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:#ec4899;font-weight:700}
+  h2{margin:1px 0 0;font-size:1.2rem}
+  .sec{break-inside:avoid;margin:0 0 10px 42px}
+  .tag{display:block;font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;color:#8a82a0;font-weight:700;margin-bottom:2px}
+  pre{margin:0;font-family:Consolas,"Courier New",monospace;font-size:.9rem;line-height:1.35;white-space:pre-wrap}
+  .ch{color:#7c3aed}
+  footer{text-align:center;color:#8a82a0;font-size:.72rem;margin-top:20px}
+  @media print{body{background:#fff}.bar{display:none}main{margin:0;max-width:none;box-shadow:none;border-radius:0;padding:0}.ch{color:#000}}
+  @media (max-width:640px){main{margin:0;border-radius:0;padding:24px 18px}.sec{margin-left:0}}
+</style></head><body>
+<div class="bar"><button onclick="print()">🖨 Imprimir / salvar em PDF</button><button class="ghost" onclick="close()">Fechar</button></div>
+<main>
+  <div class="top"><small>Folheto da celebração</small><h1>${esc(data.title)}</h1>
+    <p>${esc(slDate(data.date))}${data.season ? " · " + esc(data.season) : ""}</p>${data.notes ? `<p><i>${esc(data.notes)}</i></p>` : ""}</div>
+  ${items || "<p style='text-align:center;color:#8a82a0'>Nenhum canto escolhido ainda.</p>"}
+  <footer>Repertório organizado no ACAIAMUSIC · sua fé em forma de canção</footer>
+</main></body></html>`;
+}
+$("#sl-print").onclick = async () => {
+  const data = slCollect();
+  const withChords = $("#sl-chords").checked;
+  // a janela abre já no toque (senão o navegador bloqueia), e o folheto entra quando estiver pronto
+  const w = window.open("", "_blank");
+  w?.document.write(`<p style="font-family:sans-serif;text-align:center;margin-top:30vh">Montando o folheto${withChords ? " e criando as cifras que faltam" : ""}…</p>`);
+  const parts = [];
+  let made = 0;
+  for (const it of data.items) {
+    const r = slResolve(it);
+    if (!r) continue;
+    const had = Boolean(r.chordSecs?.length);
+    const chords = withChords ? await slChordsFor(it, r) : null;
+    if (chords && !had) made++;
+    parts.push({ it, r, chords });
+  }
+  const html = slBookletHtml(data, parts);
+  if (made) toast(`🎸 ${made} cifra(s) criada(s) agora para o folheto.`, false, 4000);
+  if (w) {
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 400);
+    return;
+  }
+  // janela bloqueada: imprime aqui mesmo e só apaga depois que a impressão terminar
   const div = document.createElement("div");
   div.id = "print-area";
-  div.innerHTML = `<h1>${esc(data.title)}</h1><p>${esc(slDate(data.date))}${data.season ? " · " + esc(data.season) : ""}</p>${data.notes ? `<p><i>${esc(data.notes)}</i></p>` : ""}<hr>${body}<p style="margin-top:30px;font-size:11px">Repertório organizado no ACAIAMUSIC · sua fé em forma de canção</p>`;
+  div.innerHTML = new DOMParser().parseFromString(html, "text/html").querySelector("main").innerHTML;
   document.body.appendChild(div);
-  window.print();
-  div.remove();
+  const done = () => div.remove();
+  window.addEventListener("afterprint", done, { once: true });
+  setTimeout(() => window.print(), 100);
 };
 $("#sl-wa").onclick = () => {
   const data = slCollect();
@@ -2993,8 +3103,9 @@ $("#print-chords").onclick = () => {
   div.id = "print-area";
   div.innerHTML = `<h1>${esc(dlgSong.title)}</h1><p>Tom: ${esc(currentKey())}${capoNote() ? ` · ${esc(capoNote())}` : ""}</p>${chordSheet(dlgSong, shiftNow(), true)}<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:16px">${$("#chord-diagrams").innerHTML.replace(/class="diag"/g, 'style="width:90px;text-align:center"')}</div><p style="margin-top:30px;font-size:11px">Cifra criada no ACAIAMUSIC</p>`;
   document.body.appendChild(div);
-  window.print();
-  div.remove();
+  // só apaga depois que a impressão terminar (no celular o print() não espera e saía em branco)
+  window.addEventListener("afterprint", () => div.remove(), { once: true });
+  setTimeout(() => window.print(), 100);
 };
 
 // ---------------- Karaokê: cantar por cima do playback, juntar e melhorar ----------------
@@ -4239,7 +4350,7 @@ function renderQueue(q) {
       : (() => {
           const run = q.items?.find((i) => i.running);
           const st = run ? `${Q_STAGES[qStage(run.status)].label}${run.stageAt ? " " + mmss(Date.now() - run.stageAt) : ""}` : "";
-          return `${run?.kind === "video" ? "🎬" : "🎵"} ${run ? `${run.progress || 0}% · ` : ""}${q.pending > 1 ? `${q.pending} na fila · ` : ""}${st || "Na fila"}${q.current ? ` · ${q.current.label}` : ""}`;
+          return `${run?.kind === "video" ? "🎬" : run?.kind === "lyric" ? "📝" : "🎵"} ${run ? `${run.progress || 0}% · ` : ""}${q.pending > 1 ? `${q.pending} na fila · ` : ""}${st || "Na fila"}${q.current ? ` · ${q.current.label}` : ""}`;
         })();
     pill.title = `${q.current?.message || "Na fila"}\nToque para pausar, cancelar ou ver a fila.`;
   }
@@ -4253,9 +4364,9 @@ function renderQueue(q) {
           const wait = it.retryAt ? ` · nova tentativa às ${new Date(it.retryAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "";
           const tries = it.tries > 1 || it.retryAt ? ` · tentativa ${Math.min(it.tries + (it.running ? 0 : 1), it.maxTries)} de ${it.maxTries}` : "";
           return `<li class="${it.running ? "run" : ""}" data-id="${esc(it.id)}">
-            <span>${it.kind === "video" ? "🎬" : it.running ? "🎙️" : k + 1 + "."}</span>
-            <div class="qd-info"><b>${qLabel(it.label)}${it.running ? `<span class="qd-pct">${it.progress || 0}%</span>` : ""}</b>${it.running ? `<div class="progress qd-bar"><div style="width:${Math.max(2, it.progress || 0)}%"></div></div>` + (it.kind === "video" ? "" : stagesHtml(it)) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
-            <div class="qd-act">${it.kind === "video" ? `<button class="btn ghost" data-open="${esc(it.songId)}" data-video="1" title="Abrir a música na aba do vídeo">Abrir</button><button class="btn ghost danger" data-q="cancel">Cancelar</button>` : `
+            <span>${it.kind === "video" ? "🎬" : it.kind === "lyric" ? "📝" : it.kind ? "⚙️" : it.running ? "🎙️" : k + 1 + "."}</span>
+            <div class="qd-info"><b>${qLabel(it.label)}${it.running ? `<span class="qd-pct">${it.progress || 0}%</span>` : ""}</b>${it.running ? `<div class="progress qd-bar"><div style="width:${Math.max(2, it.progress || 0)}%"></div></div>` + (it.kind ? "" : stagesHtml(it)) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
+            <div class="qd-act">${it.kind ? `${it.kind === "video" ? `<button class="btn ghost" data-open="${esc(it.songId)}" data-video="1" title="Abrir a música na aba do vídeo">Abrir</button>` : ""}${it.kind !== "task" ? `<button class="btn ghost danger" data-q="cancel">Cancelar</button>` : ""}` : `
               ${!it.running && (it.retryAt || k > 0) ? `<button class="btn ghost" data-q="now" title="Passar para a frente e tentar já">Agora</button>` : ""}
               ${!it.running && k > 0 && !q.items[k - 1].running ? `<button class="btn ghost" data-q="up" aria-label="Subir na fila" title="Subir">↑</button>` : ""}
               ${!it.running && k < q.items.length - 1 ? `<button class="btn ghost" data-q="down" aria-label="Descer na fila" title="Descer">↓</button>` : ""}
@@ -4270,7 +4381,9 @@ function renderQueue(q) {
   $("#qd-hist").innerHTML = hist
     .map(
       (h) => `<li data-id="${esc(h.id)}"><span>${Q_ICON[h.status] || "•"}</span><div class="qd-info"><b>${esc(h.label)}</b><small>${Q_WORD[h.status] || h.status} · ${new Date(h.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${h.error ? " · " + esc(h.error) : ""}</small></div><div class="qd-act">${
-        h.songId ? `<button class="btn ghost" data-open="${esc(h.songId)}"${h.kind === "video" ? ` data-video="1">Ver vídeo` : ">Ouvir"}</button>` : ""
+        h.kind === "lyric" && h.status === "done"
+          ? `<button class="btn ghost" data-lyric="${esc(h.id)}">Abrir letra</button>`
+          : h.songId ? `<button class="btn ghost" data-open="${esc(h.songId)}"${h.kind === "video" ? ` data-video="1">Ver vídeo` : ">Abrir"}</button>` : ""
       }${h.retry ? `<button class="btn ghost" data-h="retry" title="Pôr de volta na fila">↻ Tentar de novo</button>` : ""}<button class="btn ghost" data-h="del" aria-label="Tirar do histórico" title="Tirar do histórico">✕</button></div></li>`,
     )
     .join("");
@@ -4335,6 +4448,19 @@ $("#qd-pause").onclick = async (e) => {
   }
 };
 $("#queue-dialog").addEventListener("click", async (e) => {
+  const lyr = e.target.closest("[data-lyric]");
+  if (lyr) {
+    try {
+      const j = await api(`/api/jobs/${lyr.dataset.lyric}`);
+      if (!j.plan) throw new Error("Essa letra não está mais guardada na fila.");
+      $("#queue-dialog").close();
+      showView("create");
+      openLyricResult(j.plan, lyricJobs.get(lyr.dataset.lyric));
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
   const open = e.target.closest("[data-open]");
   if (open) {
     if (open.dataset.video) {

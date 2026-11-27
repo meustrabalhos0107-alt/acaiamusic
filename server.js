@@ -175,12 +175,42 @@ app.post("/api/lyrics", async (req, res) => {
   if (!idea && options.mode === "catolica" && !options.reading && !OFFICIAL_TEXTS[options.moment]) {
     return res.status(400).json({ error: "Escreva o tema do canto ou cole a leitura do dia." });
   }
-  try {
+  const compose = async () => {
     const parts = idea ? await splitIdea(idea) : null;
     const lyricIdea = parts && (parts.melody || parts.music) ? parts.lyrics || (options.mode === "livre" ? idea : "") : idea;
     const plan = await writeLyrics({ idea: lyricIdea, options, language: String(b.language || "pt"), duration: Number(b.duration) || 60 });
     plan.styles = buildTags(options, plan.styles, ideaMusicTags(parts)).split(", ").slice(0, 14);
-    res.json({ ...plan, ideaParts: parts });
+    return { ...plan, ideaParts: parts };
+  };
+  if (b.background) {
+    // na fila de criação: a pessoa continua usando o app; as pausas do compositor grátis
+    // são esperadas aqui (sem prender a tela)
+    const id = randomUUID();
+    const job = { status: "generating", message: "Compondo a letra…", progress: 10, createdAt: Date.now() };
+    jobs.set(id, job);
+    const what = idea ? idea.replace(/\s+/g, " ").slice(0, 40) + (idea.length > 40 ? "…" : "") : options.moment || "nova letra";
+    trackTask({ id, kind: "lyric", label: `📝 Letra · ${what}` });
+    res.json({ jobId: id });
+    for (let t = 0; t < 5; t++) {
+      if (job.canceled) return;
+      try {
+        const plan = await compose();
+        if (!job.canceled) Object.assign(job, { status: "done", progress: 100, message: `Letra pronta: ${plan.title}`, plan, updatedAt: Date.now() });
+        return;
+      } catch (e) {
+        if (!(e instanceof LyricsError) || !e.retryAfter || t === 4) {
+          if (!job.canceled) Object.assign(job, { status: "error", error: e.message || "Erro ao gerar a letra.", updatedAt: Date.now() });
+          return;
+        }
+        const wait = (e.retryAfter || 20) + 2;
+        Object.assign(job, { message: `O compositor gratuito pediu uma pausa: tento de novo em ${wait}s`, progress: 10 + t * 15, updatedAt: Date.now() });
+        await new Promise((r) => setTimeout(r, wait * 1000));
+      }
+    }
+    return;
+  }
+  try {
+    res.json(await compose());
   } catch (e) {
     lyricsError(res, e);
   }
@@ -897,7 +927,7 @@ function sideView() {
       continue;
     }
     const running = j.status !== "waiting";
-    out.push({ id, label: t.label, kind: t.kind, songId: t.songId, running, status: j.status, startedAt: t.createdAt, stageAt: 0, message: running ? j.message || "Montando…" : "Na fila de vídeos", tries: 1, maxTries: 1, retryAt: 0, progress: Math.round(j.progress || 0) });
+    out.push({ id, label: t.label, kind: t.kind, songId: t.songId, running, status: j.status, startedAt: t.createdAt, stageAt: 0, message: running ? j.message || "Montando…" : "Na fila de vídeos", tries: 1, maxTries: 1, retryAt: 0, progress: Math.round(j.progress ?? (j.total ? ((j.step || 0) / j.total) * 100 : 0)) });
   }
   return out;
 }
@@ -1425,7 +1455,10 @@ app.patch("/api/lyrics-lib/:id", async (req, res) => {
   res.json(updated);
 });
 app.delete("/api/lyrics-lib/:id", async (req, res) => {
-  await updateLyricsLib((list) => list.filter((l) => l.id !== req.params.id));
+  // a letra sai de "Minhas letras"; se um repertório (Missa, álbum) ainda usa, fica guardada escondida
+  // para ele continuar com a letra. As músicas têm a letra delas e nunca são afetadas.
+  const used = (await loadSetlists()).some((sl) => (sl.items || []).some((it) => it.kind === "lyric" && it.ref === req.params.id));
+  await updateLyricsLib((list) => (used ? list.map((l) => (l.id === req.params.id ? { ...l, deleted: true } : l)) : list.filter((l) => l.id !== req.params.id)));
   res.json({ ok: true });
 });
 
@@ -1658,6 +1691,7 @@ app.post("/api/setlists/:id/record", async (req, res) => {
   const id = randomUUID();
   const job = { status: "generating", message: "Preparando…", step: 0, total: todo.length, items: todo.map((t) => ({ i: t.i, moment: t.moment, title: t.plan.title, kind: "lyric" })), setlistId: sl.id, createdAt: Date.now() };
   jobs.set(id, job);
+  trackTask({ id, kind: "task", label: `🎼 Gravar o repertório · ${sl.title}` });
   const set = (p) => Object.assign(job, p, { updatedAt: Date.now() });
   res.json({ jobId: id, count: todo.length });
   try {
@@ -1690,6 +1724,7 @@ app.post("/api/mass-ready", async (req, res) => {
   const id = randomUUID();
   const job = { status: "generating", message: "Lendo a liturgia do dia…", step: 0, total: plan.length * (withMusic ? 2 : 1), items: [], createdAt: Date.now() };
   jobs.set(id, job);
+  trackTask({ id, kind: "task", label: `⛪ Missa pronta · ${lit.title || lit.date}` });
   const set = (p) => Object.assign(job, p, { updatedAt: Date.now() });
   res.json({ jobId: id, liturgy: lit });
 
@@ -1784,6 +1819,7 @@ História: ${story}`;
   const id = randomUUID();
   const job = { status: "generating", message: `Compondo a canção para ${name}…`, createdAt: Date.now(), progress: 10 };
   jobs.set(id, job);
+  trackTask({ id, kind: "task", label: `💝 Música para ${name}` });
   res.json({ jobId: id });
   try {
     const plan = await writeLyrics({ idea, options, language: "pt", duration: 150 });
@@ -1882,6 +1918,7 @@ app.post("/api/terco", async (req, res) => {
   const id = randomUUID();
   const job = { status: "generating", message: "Preparando o terço…", step: 0, total: 10, items: [], createdAt: Date.now() };
   jobs.set(id, job);
+  trackTask({ id, kind: "task", label: "📿 Terço cantado" });
   const set = (p) => Object.assign(job, p, { updatedAt: Date.now() });
   const weekday = new Date(date + "T12:00:00Z").toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" });
   const setlist = {
@@ -1952,6 +1989,21 @@ app.post("/api/songs/:id/chords", async (req, res) => {
     chords ||= await generateChords({ sections: song.sections, key, mode: song.options?.mode, genre: song.genre });
     await updateSongs((songs) => songs.map((s) => (s.id === song.id ? { ...s, chords } : s)));
     res.json(chords);
+  } catch (e) {
+    lyricsError(res, e);
+  }
+});
+
+// Cifra na hora para uma letra (de "Minhas letras" no folheto do repertório): só pela IA, sem salvar
+app.post("/api/chords", async (req, res) => {
+  const b = req.body || {};
+  const sections = (Array.isArray(b.sections) ? b.sections : [])
+    .slice(0, 30)
+    .map((s) => ({ name: String(s?.name || "").slice(0, 60), lines: (Array.isArray(s?.lines) ? s.lines : []).slice(0, 40).map((l) => String(l).slice(0, 200)) }))
+    .filter((s) => s.lines.some((l) => l.trim()));
+  if (!sections.length) return res.status(400).json({ error: "Não há letra para cifrar." });
+  try {
+    res.json(await generateChords({ sections, key: String(b.key || "").slice(0, 10), mode: b.mode === "catolica" ? "catolica" : "livre", genre: String(b.genre || "").slice(0, 60) }));
   } catch (e) {
     lyricsError(res, e);
   }
