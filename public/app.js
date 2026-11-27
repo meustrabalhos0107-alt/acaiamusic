@@ -1107,6 +1107,8 @@ function renderLyricsLib() {
 let loItem = null;
 function openLyric(item) {
   loItem = item;
+  $("#lo-del").classList.toggle("hidden", !item.id);
+  $("#lo-music").classList.toggle("hidden", !item.id);
   const meta = [item.mode === "catolica" ? item.moment || "Litúrgica" : "Livre", item.mode === "catolica" ? item.season : "", LYRICS_SOURCE[item.source]].filter(Boolean);
   $("#lo-meta").textContent = meta.join(" · ");
   $("#lo-title").value = item.title;
@@ -1114,8 +1116,46 @@ function openLyric(item) {
   $("#lyric-dialog").showModal();
   $("#lo-text").scrollTop = 0;
 }
+$("#ly-new").onclick = () => {
+  openLyric({ title: "", text: "", mode: "livre", source: "propria" });
+  $("#lo-meta").textContent = "Nova letra";
+  $("#lo-title").placeholder = "Título da letra";
+  $("#lo-text").placeholder = "[Estrofe 1]\nEscreva a letra aqui…\n\n[Refrão]\n…";
+  $("#lo-title").focus();
+};
+$("#lo-del").onclick = async () => {
+  if (!loItem?.id || !confirm(`Excluir a letra “${loItem.title}”? As músicas já criadas não são afetadas.`)) return;
+  try {
+    await api(`/api/lyrics-lib/${loItem.id}`, { method: "DELETE" });
+    state.lyricsLib = state.lyricsLib.filter((l) => l.id !== loItem.id);
+    $("#lyr-count").textContent = state.lyricsLib.length || "";
+    $("#lyric-dialog").close();
+    renderLyricsLib();
+    toast("Letra excluída.", false, 1800);
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
 $("#lo-save").onclick = async () => {
   if (!loItem) return;
+  if (!loItem.id) {
+    // nova letra
+    const text = $("#lo-text").value;
+    if (!text.trim()) return toast("Escreva a letra antes de salvar.", true);
+    try {
+      const item = await api("/api/lyrics-lib", { method: "POST", body: JSON.stringify({ title: $("#lo-title").value.trim() || "Sem título", text, mode: "livre", source: "propria" }) });
+      state.lyricsLib.unshift(item);
+      $("#lyr-count").textContent = state.lyricsLib.length;
+      loItem = item;
+      $("#lo-del").classList.remove("hidden");
+      $("#lo-music").classList.remove("hidden");
+      renderLyricsLib();
+      toast("Letra salva em Minhas letras ✓", false, 2000);
+    } catch (e) {
+      toast(e.message, true);
+    }
+    return;
+  }
   try {
     const upd = await api(`/api/lyrics-lib/${loItem.id}`, { method: "PATCH", body: JSON.stringify({ title: $("#lo-title").value.trim() || loItem.title, text: $("#lo-text").value }) });
     const i = state.lyricsLib.findIndex((l) => l.id === upd.id);
@@ -1167,6 +1207,7 @@ $$("#lib-switch button").forEach((b) =>
     state.libMode = b.dataset.l;
     $$("#lib-switch button").forEach((x) => x.classList.toggle("on", x === b));
     renderLibrary();
+    if (state.libMode === "lyrics") loadLyricsLib().then(() => state.libMode === "lyrics" && renderLyricsLib());
   }),
 );
 
@@ -3666,6 +3707,7 @@ const qLabel = (l) => {
   return `<span class="qd-t">${esc(m ? m[1] : l)}</span>${m ? `<span class="qd-tag" title="${esc(m[2])}">🎯 refazendo</span>` : ""}`;
 };
 function renderQueue(q) {
+  $("#lib-queue-n").textContent = q.pending || "";
   const pill = $("#queue-pill");
   pill.classList.toggle("hidden", !q.pending);
   pill.classList.toggle("paused", Boolean(q.paused));
@@ -3693,7 +3735,10 @@ function renderQueue(q) {
             <div class="qd-info"><b>${qLabel(it.label)}</b>${it.running ? stagesHtml(it) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
             <div class="qd-act">
               ${!it.running && (it.retryAt || k > 0) ? `<button class="btn ghost" data-q="now" title="Passar para a frente e tentar já">Agora</button>` : ""}
-              <button class="btn ghost" data-q="cancel">Cancelar</button>
+              ${!it.running && k > 0 && !q.items[k - 1].running ? `<button class="btn ghost" data-q="up" aria-label="Subir na fila" title="Subir">↑</button>` : ""}
+              ${!it.running && k < q.items.length - 1 ? `<button class="btn ghost" data-q="down" aria-label="Descer na fila" title="Descer">↓</button>` : ""}
+              ${!it.running ? `<button class="btn ghost" data-q="edit" title="Mudar título e letra antes de gravar">✎ Editar</button>` : ""}
+              <button class="btn ghost danger" data-q="cancel">Cancelar</button>
             </div></li>`;
         })
         .join("")
@@ -3702,9 +3747,9 @@ function renderQueue(q) {
   $("#qd-hist-title").classList.toggle("hidden", !hist.length);
   $("#qd-hist").innerHTML = hist
     .map(
-      (h) => `<li><span>${Q_ICON[h.status] || "•"}</span><div class="qd-info"><b>${esc(h.label)}</b><small>${Q_WORD[h.status] || h.status} · ${new Date(h.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${h.error ? " · " + esc(h.error) : ""}</small></div>${
-        h.songId ? `<div class="qd-act"><button class="btn ghost" data-open="${esc(h.songId)}">Ouvir</button></div>` : ""
-      }</li>`,
+      (h) => `<li data-id="${esc(h.id)}"><span>${Q_ICON[h.status] || "•"}</span><div class="qd-info"><b>${esc(h.label)}</b><small>${Q_WORD[h.status] || h.status} · ${new Date(h.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${h.error ? " · " + esc(h.error) : ""}</small></div><div class="qd-act">${
+        h.songId ? `<button class="btn ghost" data-open="${esc(h.songId)}">Ouvir</button>` : ""
+      }${h.retry ? `<button class="btn ghost" data-h="retry" title="Pôr de volta na fila">↻ Tentar de novo</button>` : ""}<button class="btn ghost" data-h="del" aria-label="Tirar do histórico" title="Tirar do histórico">✕</button></div></li>`,
     )
     .join("");
 }
@@ -3713,6 +3758,51 @@ async function openQueue() {
   refreshQueue();
 }
 $("#queue-pill").onclick = openQueue;
+$("#lib-queue").onclick = openQueue;
+$("#qd-studio").onclick = () => ($("#queue-dialog").close(), showView("create"));
+$("#qd-clear").onclick = async () => {
+  try {
+    renderQueue(await api("/api/queue/history", { method: "DELETE" }));
+  } catch (err) {
+    toast(err.message, true);
+  }
+};
+// Editar um pedido da fila (título e letra) antes de ser gravado
+let qeId = null;
+async function openQueueEdit(id) {
+  try {
+    const it = await api(`/api/queue/${encodeURIComponent(id)}`);
+    if (it.running) return toast("Esta música já está sendo gravada.", true);
+    qeId = id;
+    $("#qe-title").value = it.title;
+    $("#qe-text").value = it.text;
+    $("#qedit-dialog").showModal();
+    $("#qe-text").scrollTop = 0;
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+$("#qe-save").onclick = async () => {
+  const sections = textToSections($("#qe-text").value);
+  if (!sections.length) return toast("A letra está vazia.", true);
+  try {
+    renderQueue(await api(`/api/queue/${encodeURIComponent(qeId)}`, { method: "PATCH", body: JSON.stringify({ title: $("#qe-title").value.trim(), sections }) }));
+    $("#qedit-dialog").close();
+    toast("Pedido atualizado na fila ✓", false, 2000);
+  } catch (err) {
+    toast(err.message, true);
+  }
+};
+$("#qe-cancel").onclick = async () => {
+  if (!confirm(`Cancelar "${$("#qe-title").value}"?`)) return;
+  try {
+    renderQueue(await api(`/api/queue/${encodeURIComponent(qeId)}/cancel`, { method: "POST" }));
+    $("#qedit-dialog").close();
+    toast("🚫 Música cancelada.");
+  } catch (err) {
+    toast(err.message, true);
+  }
+};
 $("#qd-pause").onclick = async (e) => {
   const resume = Boolean(e.currentTarget.dataset.paused);
   try {
@@ -3729,10 +3819,35 @@ $("#queue-dialog").addEventListener("click", async (e) => {
     if (song) ($("#queue-dialog").close(), play(song), openSong(song));
     return;
   }
+  const hb = e.target.closest("[data-h]");
+  if (hb) {
+    const hid = hb.closest("li").dataset.id;
+    const retry = hb.dataset.h === "retry";
+    hb.disabled = true;
+    try {
+      renderQueue(await api(`/api/queue/history/${encodeURIComponent(hid)}${retry ? "/retry" : ""}`, { method: retry ? "POST" : "DELETE" }));
+      if (retry) (toast("↻ De volta na fila."), refreshQueue());
+    } catch (err) {
+      toast(err.message, true);
+      hb.disabled = false;
+    }
+    return;
+  }
   const b = e.target.closest("[data-q]");
   if (!b) return;
   const li = b.closest("li");
   const id = li.dataset.id;
+  if (b.dataset.q === "edit") return openQueueEdit(id);
+  if (b.dataset.q === "up" || b.dataset.q === "down") {
+    b.disabled = true;
+    try {
+      renderQueue(await api(`/api/queue/${encodeURIComponent(id)}/move`, { method: "POST", body: JSON.stringify({ dir: b.dataset.q === "up" ? -1 : 1 }) }));
+    } catch (err) {
+      toast(err.message, true);
+      b.disabled = false;
+    }
+    return;
+  }
   if (b.dataset.q === "cancel" && !confirm(`Cancelar "${li.querySelector("b").textContent}"?`)) return;
   b.disabled = true;
   try {

@@ -645,9 +645,12 @@ let currentTask = null;
 let cancelCurrent = null; // libera a espera da tarefa atual quando ela é cancelada
 let wake = () => {}; // acorda a fila quando ela está esperando uma nova tentativa
 const history = []; // últimas músicas que saíram da fila (prontas, com erro ou canceladas)
+const historyTasks = new Map(); // pedidos que saíram com erro ou cancelados, para poder pôr de volta na fila
 function remember(t, status, extra = {}) {
-  history.unshift({ id: t.id, label: t.label || t.input?.plan?.title || "Música", status, at: Date.now(), ...extra });
+  history.unshift({ id: t.id, label: t.label || t.input?.plan?.title || "Música", status, at: Date.now(), retry: status !== "done", ...extra });
+  if (status !== "done") historyTasks.set(t.id, t);
   history.length = Math.min(history.length, 12);
+  for (const id of historyTasks.keys()) if (!history.some((h) => h.id === id)) historyTasks.delete(id);
 }
 const queuePaused = () => Boolean(getSettings().queuePaused);
 
@@ -807,6 +810,70 @@ app.post("/api/queue/:id/now", (req, res) => {
   }
   wake();
   pump();
+  res.json(queueView());
+});
+// Ver um pedido da fila (título e letra) para editar antes de gravar
+const sectionsText = (sections = []) => sections.map((s) => `[${s.name}]\n${(s.lines || []).join("\n")}`).join("\n\n");
+app.get("/api/queue/:id", (req, res) => {
+  const t = queue.find((q) => q.id === req.params.id);
+  if (!t) return res.status(404).json({ error: "Essa música não está mais na fila." });
+  res.json({ id: t.id, title: t.input?.plan?.title || t.label || "", text: sectionsText(t.input?.plan?.sections), running: t === currentTask, duration: t.input?.duration || 0 });
+});
+// Editar título e letra de um pedido que ainda não começou a ser gravado
+app.patch("/api/queue/:id", (req, res) => {
+  const t = queue.find((q) => q.id === req.params.id);
+  if (!t) return res.status(404).json({ error: "Essa música não está mais na fila." });
+  if (t === currentTask) return res.status(409).json({ error: "Esta música já está sendo gravada. Cancele e crie de novo para mudar." });
+  const plan = t.input.plan;
+  const oldTitle = plan.title;
+  const title = String(req.body?.title ?? "").trim().slice(0, 120);
+  if (title) plan.title = title;
+  if (Array.isArray(req.body?.sections)) {
+    let clean;
+    try {
+      clean = cleanPlan({ ...plan, sections: req.body.sections }, false);
+    } catch {
+      return res.status(400).json({ error: "A letra ficou vazia." });
+    }
+    if (JSON.stringify(clean.sections) !== JSON.stringify(plan.sections)) {
+      plan.sections = clean.sections;
+      delete plan.chords; // a cifra era da letra antiga
+    }
+  }
+  if (title && t.label) t.label = t.label === oldTitle ? title : t.label.startsWith(oldTitle + " (") ? title + t.label.slice(oldTitle.length) : t.label;
+  saveQueue();
+  res.json(queueView());
+});
+// Subir / descer na fila (a que está sendo gravada fica onde está)
+app.post("/api/queue/:id/move", (req, res) => {
+  const i = queue.findIndex((q) => q.id === req.params.id);
+  if (i < 0) return res.status(404).json({ error: "Essa música não está mais na fila." });
+  const j = i + (Number(req.body?.dir) < 0 ? -1 : 1);
+  if (queue[i] === currentTask || j < 0 || j >= queue.length || queue[j] === currentTask) return res.json(queueView());
+  [queue[i], queue[j]] = [queue[j], queue[i]];
+  saveQueue();
+  markQueued();
+  res.json(queueView());
+});
+// Histórico: pôr de volta na fila (erro / cancelada), apagar um item ou limpar tudo
+app.post("/api/queue/history/:id/retry", (req, res) => {
+  const t = historyTasks.get(req.params.id);
+  if (!t) return res.status(404).json({ error: "Não guardei esse pedido (o servidor reiniciou). Crie a música de novo pelo estúdio." });
+  if (t.input?.replaceId && queue.some((q) => q.input?.replaceId === t.input.replaceId)) return res.status(409).json({ error: "Esta música já está na fila." });
+  enqueueSong(randomUUID(), t.input, { label: t.label, ...(t.setlist ? { setlist: t.setlist } : {}) });
+  historyTasks.delete(t.id);
+  history.splice(history.findIndex((h) => h.id === t.id), 1);
+  res.json(queueView());
+});
+app.delete("/api/queue/history/:id", (req, res) => {
+  const k = history.findIndex((h) => h.id === req.params.id);
+  if (k >= 0) history.splice(k, 1);
+  historyTasks.delete(req.params.id);
+  res.json(queueView());
+});
+app.delete("/api/queue/history", (_req, res) => {
+  history.length = 0;
+  historyTasks.clear();
   res.json(queueView());
 });
 

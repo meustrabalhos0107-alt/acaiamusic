@@ -1176,3 +1176,33 @@ dialog { max-width: calc(100vw - 16px); }
 .qd-tag { flex: none; margin-left: 0; }
 .session-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
 .session-actions small { flex: 1 1 220px; font-size: 0.75rem; }
+
+/* Biblioteca no celular: as colunas encolhem com a tela (antes os títulos longos esticavam o cartão para fora) */
+.library { grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); }
+.library.compact { grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr)); }
+.lyrics-lib { grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); }
+.card, .lyric-card { min-width: 0; }
+.lyric-card h4 { overflow-wrap: anywhere; }
+.lib-head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lib-head-tools input { max-width: 300px; }
+#lib-queue em { font-style: normal; font-size: 0.7rem; background: var(--accent-2); color: #fff; padding: 1px 6px; border-radius: 99px; margin-left: 4px; }
+#lib-queue em:empty { display: none; }
+.lib-switch { max-width: 100%; }
+.lib-switch button { min-width: 0; }
+.qd-sub { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.qd-act { flex-wrap: wrap; }
+#lyric-dialog .pane-actions, #qedit-dialog .pane-actions { flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .library { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lib-head, .lib-head-tools { width: 100%; }
+  .lib-head-tools input { max-width: none; flex: 1 1 100%; }
+  #lib-queue { flex: 1 1 100%; }
+  .lib-switch { display: flex; width: 100%; }
+  .lib-switch button { flex: 1 1 0; padding: 9px 6px; }
+  #ly-new { flex: 1 1 100%; }
+  .lyric-card { padding: 14px; }
+  .lyric-card .lc-actions .btn { flex: 1 1 calc(50% - 6px); }
+}
+@media (max-width: 380px) {
+  .library { grid-template-columns: minmax(0, 1fr); }
+}

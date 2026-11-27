@@ -398,7 +398,10 @@
           <span class="eyebrow">Sua coleção</span>
           <h1>Biblioteca</h1>
         </div>
-        <input id="search" type="search" placeholder="Buscar por título, momento, estilo…" />
+        <div class="lib-head-tools">
+          <input id="search" type="search" placeholder="Buscar por título, momento, estilo…" />
+          <button class="btn ghost sm" id="lib-queue" title="Ver, editar, reordenar e cancelar as músicas sendo criadas">🎵 Fila de criação <em id="lib-queue-n"></em></button>
+        </div>
       </header>
       <div class="lib-switch" id="lib-switch">
         <button class="on" data-l="songs">Músicas</button>
@@ -417,6 +420,7 @@
           </select>
           <button class="link sm hidden" id="ly-clear">Limpar filtros</button>
         </div>
+        <button class="btn primary sm" id="ly-new">＋ Nova letra</button>
         <select id="ly-sort" aria-label="Ordenar letras">
           <option value="new">Mais recentes</option>
           <option value="old">Mais antigas</option>
@@ -852,9 +856,9 @@
     <span class="eyebrow">Segundo plano</span>
     <h2>🎵 Fila de criação</h2>
     <p class="muted small">As músicas são criadas uma de cada vez, mesmo com o app fechado. Pausar deixa terminar a que já está sendo gravada e segura as próximas.</p>
-    <div class="srv-btns"><button class="btn primary" id="qd-pause">⏸ Pausar a fila</button></div>
+    <div class="srv-btns"><button class="btn primary" id="qd-pause">⏸ Pausar a fila</button><button class="btn ghost" id="qd-studio">＋ Criar outra música</button></div>
     <ul class="qd-list" id="qd-list"></ul>
-    <h4 class="qd-sub hidden" id="qd-hist-title">Recentes</h4>
+    <h4 class="qd-sub hidden" id="qd-hist-title">Recentes <button class="link sm" id="qd-clear">Limpar histórico</button></h4>
     <ul class="qd-list qd-hist" id="qd-hist"></ul>
   </dialog>
 
@@ -868,6 +872,20 @@
       <button class="btn primary" id="lo-save">Salvar alterações</button>
       <button class="btn ghost" id="lo-copy">Copiar</button>
       <button class="btn ghost" id="lo-music">🎵 Criar música com esta letra</button>
+      <button class="btn ghost danger" id="lo-del">Excluir</button>
+    </div>
+  </dialog>
+
+  <!-- ============ EDITAR UM PEDIDO DA FILA ============ -->
+  <dialog id="qedit-dialog" class="settings lyric-open">
+    <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">Fila de criação · editar antes de gravar</span>
+    <input id="qe-title" class="lo-title" type="text" maxlength="120" aria-label="Título" />
+    <textarea id="qe-text" class="lo-text" rows="16" maxlength="20000" aria-label="Letra"></textarea>
+    <p class="muted small">Use [Refrão], [Estrofe 1]… para marcar as partes. Se mudar a letra, a cifra antiga é descartada.</p>
+    <div class="pane-actions">
+      <button class="btn primary" id="qe-save">Salvar na fila</button>
+      <button class="btn ghost danger" id="qe-cancel">Cancelar esta música</button>
     </div>
   </dialog>
 
