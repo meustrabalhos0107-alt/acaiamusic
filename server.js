@@ -1000,6 +1000,22 @@ function autoIllustrate(songId) {
     .catch((e) => !e.busy && console.log("Capa automática falhou:", e.message));
 }
 // músicas que ainda não têm capa ilustrada (as antigas e as que perderam a capa ao serem refeitas)
+// Varredura: músicas antigas (de antes da batida do teclado) ganham o estilo do PSR-E343 que mais
+// combina com elas. Fica marcado como "sugerido", porque não foram gravadas com essa batida.
+async function keyboardMissing() {
+  let n = 0;
+  await updateSongs((songs) =>
+    songs.map((s) => {
+      if (s.keyboard) return s;
+      const kb = pickKeyboardStyle({ ...(s.options || {}), genre: s.options?.genre || s.genre, keyboardStyle: 0 });
+      n++;
+      return { ...s, keyboard: { model: KEYBOARD_MODEL, n: kb.n, name: kb.name, cat: kb.cat, auto: true, suggested: true } };
+    }),
+  );
+  if (n) console.log(`Teclado: batida sugerida para ${n} música(s) antiga(s)`);
+  return n;
+}
+app.post("/api/keyboard/backfill", async (_req, res) => res.json({ updated: await keyboardMissing() }));
 async function illustrateMissing() {
   const songs = await loadSongs();
   const queued = new Set(queue.map((q) => q.input?.replaceId).filter(Boolean)); // essas ganham capa quando forem refeitas
@@ -1632,6 +1648,7 @@ app.listen(PORT, () => {
   }
   console.log(`Letras: ${process.env.GEMINI_API_KEY ? "Gemini" : "Pollinations (gratuito)"}`);
   console.log(`Música: ${ACE_SPACE} ${HF_TOKEN ? "(com HF_TOKEN)" : "(SEM HF_TOKEN: configure no .env)"}`);
+  setTimeout(() => keyboardMissing().catch((e) => console.log("Varredura do teclado falhou:", e.message)), 15000);
   // capas ilustradas que faltam (só com o Modal ligado, que desenha as imagens de graça nos créditos)
   if (getSettings().modalUrl) setTimeout(() => illustrateMissing().catch(() => {}), 60000);
 });

@@ -2097,7 +2097,7 @@ function openSong(song) {
   const o = song.options || {};
   $("#dlg-tags").innerHTML = [
     o.mode === "catolica" && `⛪ ${o.moment}`, o.mode === "catolica" && o.season, song.genre, o.bpm && `${o.bpm} BPM`,
-    o.key && `Tom ${o.key.replace(" major", "").replace(" minor", "m")}`, song.keyboard && `🎹 PSR-E343 · Estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}`, song.voice, ...(o.instruments || []),
+    o.key && `Tom ${o.key.replace(" major", "").replace(" minor", "m")}`, song.keyboard && `🎹 PSR-E343 · Estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}${song.keyboard.suggested ? " (sugerido)" : ""}`, song.voice, ...(o.instruments || []),
   ].filter(Boolean).map((s) => `<span>${esc(s)}</span>`).join("");
   $("#dlg-download").href = song.url;
   $("#dlg-download").download = `${safeName(song.title)}.mp3`;
@@ -2359,7 +2359,7 @@ function specGroups(song) {
     ]]);
   groups.push(
     ["Tema", [["Ideia", sp.idea || "—"]]],
-    ["Estilo", [["Gênero", o.genre], ["Batida do teclado", song.keyboard ? `${song.keyboard.model || "PSR-E343"}: estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}${song.keyboard.auto ? " (automático)" : ""}` : null], ["Clima", (o.moods || []).join(", ") || "—"], ["Referência", song.reference ? `🎧 ${song.reference}` : null]]],
+    ["Estilo", [["Gênero", o.genre], ["Batida do teclado", song.keyboard ? `${song.keyboard.model || "PSR-E343"}: estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}${song.keyboard.suggested ? " (sugerido: a música é anterior à batida do teclado; é o estilo que mais combina)" : song.keyboard.auto ? " (automático)" : ""}` : null], ["Clima", (o.moods || []).join(", ") || "—"], ["Referência", song.reference ? `🎧 ${song.reference}` : null]]],
     ["Tempo e tom", [["Andamento", o.bpm ? `${o.bpm} BPM${o.tempo === "auto" ? " (automático)" : ""}` : "automático"], ["Tom", keyTxt], ["Progressão", o.chordProgression || null]]],
     ["Instrumentos e vozes", [["Instrumentos", (o.instruments || []).join(", ") || "automático"], ["Voz", o.voice], ["Timbre", (o.voiceStyles || []).join(", ") || null]]],
     ["Saída", [
