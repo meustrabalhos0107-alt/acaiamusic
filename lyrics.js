@@ -207,8 +207,9 @@ export function cleanPlan(raw, instrumental) {
 }
 
 // Tags finais para o modelo de música: escolhas do usuário primeiro, depois as da IA
-export function buildTags(o, aiStyles = []) {
-  const tags = [o.genreTags, ...o.moodTags, ...o.instrumentTags, ...o.voiceTags];
+// extra: o que a pessoa pediu no texto livre sobre melodia e arranjo (vem logo depois do estilo, nunca é cortado)
+export function buildTags(o, aiStyles = [], extra = []) {
+  const tags = [o.genreTags, ...extra, ...o.moodTags, ...o.instrumentTags, ...o.voiceTags];
   if (o.key) tags.push(`key of ${o.key}`);
   if (o.chordProgression) tags.push(`chord progression ${o.chordProgression}`);
   if (o.bpm) tags.push(`${o.bpm} BPM`);
@@ -588,4 +589,50 @@ Letra: ${lyric}`;
   } catch {}
   if (p.length < 20) p = fallbackScene({ title, sections, mode, moment });
   return `${p}${pal ? `, ${pal.en}` : ""}, high quality illustration, no text`;
+}
+
+// ---------- Texto livre: o que é sobre a MELODIA, a MÚSICA (arranjo) ou a LETRA ----------
+// A pessoa escreve tudo junto ("melodia que sobe no refrão, com violão e piano, falando de esperança").
+// Cada parte vai para o lugar certo: melodia e música viram instruções para o gerador de música
+// (em inglês, que ele entende melhor); a letra vai para o compositor.
+const MELODY_RE = /\b(melodi\w*|tom\b|tonalidade|nota[s]?\b|agud\w*|grave[s]?\b|subi\w*|desc\w*|escala|intervalo|frase\w* musica\w*|cantarol\w*|refr[ãa]o (marcante|pegajoso|chiclete|forte|alto)|f[áa]cil de cantar|cant[áa]vel|harmoni\w*|acorde\w*|modula\w*|menor\b|maior\b)/i;
+const MUSIC_RE = /\b(arranjo\w*|instrument\w*|viol[ãa]o|guitarra|piano|teclado|bateria|baixo\b|violino|cordas|sopro\w*|flauta|sax\w*|orquestr\w*|batida|ritmo|r[íi]tmic\w*|andamento|bpm|lento|r[áa]pido|acelerad\w*|calm[oa]|anima\w*|dan[çc]ante|estilo|g[êe]nero|pop|rock|sertanej\w*|forr[óo]|samba|pagode|gospel|worship|ac[úu]stic\w*|eletr[ôo]nic\w*|produ[çc][ãa]o|mixag\w*|voz\b|vozes|vocal\w*|coral|coro\b|dueto|feminina|masculina|introdu[çc][ãa]o|intro\b|solo\b|final\b|crescend\w*|refr[ãa]o explos\w*)/i;
+const ideaCache = new Map();
+function splitIdeaByWords(idea) {
+  const parts = { lyrics: [], melody: [], music: [] };
+  for (const s of String(idea).split(/(?<=[.!?;\n])\s+|,\s+(?=(?:com|e|mas|que|na|no)\b)/i).map((x) => x.trim()).filter(Boolean)) {
+    if (MELODY_RE.test(s)) parts.melody.push(s);
+    else if (MUSIC_RE.test(s)) parts.music.push(s);
+    else parts.lyrics.push(s);
+  }
+  return { lyrics: parts.lyrics.join(" "), melody: parts.melody.join(" "), music: parts.music.join(" "), melodyTags: "", musicTags: "", by: "palavras" };
+}
+export async function splitIdea(idea) {
+  idea = String(idea || "").trim().slice(0, 1500);
+  if (!idea) return { lyrics: "", melody: "", music: "", melodyTags: "", musicTags: "" };
+  if (ideaCache.has(idea)) return ideaCache.get(idea);
+  const system = `Você separa o pedido de uma pessoa que quer criar uma música em três partes:
+- "lyrics": o que é sobre a LETRA (tema, mensagem, assunto, palavras, história, versículos) — em português, como a pessoa escreveu;
+- "melody": o que é sobre a MELODIA (como a voz canta: subir/descer, notas, tom, agudo/grave, refrão marcante, fácil de cantar, frases longas/curtas) — em português;
+- "music": o que é sobre a MÚSICA/ARRANJO (instrumentos, ritmo, andamento, estilo, energia, voz, coral, introdução, final, produção) — em português.
+E traduza melody e music para TAGS curtas em INGLÊS para um gerador de música (ex.: "soaring melody that rises in the chorus, easy to sing", "acoustic guitar and soft piano, slow tempo, gentle build").
+Não invente nada que a pessoa não pediu; parte que não existir fica "". Responda SOMENTE com JSON:
+{"lyrics":"","melody":"","music":"","melodyTags":"","musicTags":""}`;
+  let out;
+  try {
+    const raw = await Promise.race([callLLM(system, `Pedido:\n"""${idea}"""`), new Promise((_, rej) => setTimeout(() => rej(new Error("demorou")), 25000))]);
+    const s = (k, n) => String(raw?.[k] || "").replace(/\s+/g, " ").trim().slice(0, n);
+    out = { lyrics: s("lyrics", 1500), melody: s("melody", 400), music: s("music", 400), melodyTags: s("melodyTags", 220), musicTags: s("musicTags", 220), by: "ia" };
+    if (!out.lyrics && !out.melody && !out.music) throw new Error("vazio");
+  } catch {
+    out = splitIdeaByWords(idea);
+  }
+  if (ideaCache.size > 200) ideaCache.clear();
+  ideaCache.set(idea, out);
+  return out;
+}
+// Tags para o gerador de música a partir das partes (inglês da IA ou, sem ela, o texto da pessoa)
+export function ideaMusicTags(p) {
+  if (!p) return [];
+  return [p.melodyTags || (p.melody && `melody: ${p.melody}`), p.musicTags || (p.music && `arrangement: ${p.music}`)].filter(Boolean).map((t) => t.slice(0, 240));
 }

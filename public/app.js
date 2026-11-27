@@ -515,6 +515,7 @@ $("#ref-file").addEventListener("change", (e) => {
   };
   reader.readAsDataURL(f);
 });
+$$("#md-original button").forEach((b) => b.addEventListener("click", () => $$("#md-original button").forEach((x) => x.classList.toggle("on", x === b))));
 // Referência a partir de um link do YouTube: o servidor baixa o trecho e devolve o MP3
 const ytStart = (v) => {
   const m = /^(?:(\d+):)?(\d{1,2})$/.exec(String(v || "").trim());
@@ -805,6 +806,12 @@ async function generateLyrics(btn) {
     });
     plan.cover = Math.floor(Math.random() * 1e6);
     showPlan(plan);
+    // mostra como o texto livre foi entendido
+    const ip = plan.ideaParts;
+    if (ip && (ip.melody || ip.music)) {
+      const bits = [ip.lyrics && `✍️ Letra: ${ip.lyrics}`, ip.melody && `🎵 Melodia: ${ip.melody}`, ip.music && `🎸 Música: ${ip.music}`].filter(Boolean);
+      toast(`Entendi o seu pedido assim:\n${bits.join("\n")}`, false, 9000);
+    }
   } catch (e) {
     handleLyricsError(e);
   } finally {
@@ -1512,11 +1519,16 @@ async function registroSong(song) {
 // ---------------- Refazer com revisão de pronúncia ----------------
 // Grava a música de novo do mesmo jeito; o Whisper ouve e, se a letra não estiver clara, o estúdio
 // grava outra (até 3) e fica a melhor. A nova gravação substitui a antiga no mesmo lugar.
-async function redoSong(song) {
-  if (!confirm(`Refazer “${song.title}” do mesmo jeito (mesma letra, estilo e vozes)?\n\nO Whisper confere se dá para entender a letra; se não der, o estúdio grava de novo (até 3 vezes) e fica a gravação mais clara. A nova substitui a atual.`)) return;
+function redoSong(song) {
+  $("#rd-title").textContent = `Refazer “${song.title}”`;
+  $("#rd-note").value = "";
+  $("#rd-go").onclick = () => ($("#redo-dialog").close(), redoSongNow(song, $("#rd-note").value.trim()));
+  $("#redo-dialog").showModal();
+}
+async function redoSongNow(song, note = "") {
   let r;
   try {
-    r = await api(`/api/songs/${song.id}/redo`, { method: "POST", body: JSON.stringify({ check: true }) });
+    r = await api(`/api/songs/${song.id}/redo`, { method: "POST", body: JSON.stringify({ check: true, note }) });
   } catch (e) {
     return toast(e.message, true);
   }
@@ -3116,7 +3128,9 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.roundRect(x, y, w, h, r);
 }
 // Desenha a arte do vídeo e devolve a posição do equalizador e da barra de progresso
-async function drawVideoArt(canvas, song, format) {
+// clip = true: só a camada de cima (textos, marca e sombra), com fundo transparente, para ir
+// por cima do clipe animado da capa
+async function drawVideoArt(canvas, song, format, clip = false) {
   const V = format !== "horizontal";
   const W = V ? 720 : 1280, H = V ? 1280 : 720;
   canvas.width = W;
@@ -3126,6 +3140,16 @@ async function drawVideoArt(canvas, song, format) {
   const pic = song.illustration?.url ? await loadImg(song.illustration.url).catch(() => null) : null;
   const art = pic || (await loadImg("data:image/svg+xml;charset=utf-8," + encodeURIComponent(coverArt(song.cover ?? 1, 'width="800" height="800"'))));
   const logo = await loadImg("/icon.svg").catch(() => null);
+  if (clip) {
+    // sombra só onde há texto: o clipe aparece limpo em cima e os textos continuam legíveis
+    const g = V ? ctx.createLinearGradient(0, 0, 0, H) : ctx.createLinearGradient(0, 0, W, 0);
+    g.addColorStop(0, "rgba(9,9,13,0.25)");
+    g.addColorStop(V ? 0.3 : 0.3, "rgba(9,9,13,0.05)");
+    g.addColorStop(V ? 0.48 : 0.45, "rgba(9,9,13,0.55)");
+    g.addColorStop(1, "rgba(9,9,13,0.9)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  } else {
   // fundo: capa ampliada, desfocada e escurecida
   ctx.filter = "blur(40px) saturate(1.2)";
   ctx.drawImage(art, -120, -120, W + 240, H + 240);
@@ -3136,9 +3160,11 @@ async function drawVideoArt(canvas, song, format) {
   g.addColorStop(1, "rgba(9,9,13,0.92)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
+  }
 
   // capa
   const cs = V ? 420 : 400, cx = V ? (W - cs) / 2 : 80, cy = V ? 140 : (H - cs) / 2 - 10;
+  if (!clip) {
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.6)";
   ctx.shadowBlur = 50;
@@ -3161,6 +3187,7 @@ async function drawVideoArt(canvas, song, format) {
     ctx.fillText(initials(song.title), cx + cs / 2, cy + cs / 2);
   }
   ctx.restore();
+  }
 
   // textos
   const tx = V ? W / 2 : 540, tw = V ? W - 100 : W - 540 - 70;
@@ -3293,9 +3320,16 @@ $("#btn-video").onclick = async (e) => {
   try {
     const canvas = document.createElement("canvas");
     const layout = await drawVideoArt(canvas, song, videoFormat);
+    // clipe animado: manda também a camada de cima (transparente) para ir por cima do clipe
+    let overlay = null;
+    if ($("#video-clip").checked && song.illustration?.url) {
+      const oc = document.createElement("canvas");
+      await drawVideoArt(oc, song, videoFormat, true);
+      overlay = oc.toDataURL("image/png");
+    }
     const { jobId } = await api(`/api/songs/${song.id}/video`, {
       method: "POST",
-      body: JSON.stringify({ image: canvas.toDataURL("image/png"), format: videoFormat, start: Number($("#video-start").value), layout }),
+      body: JSON.stringify({ image: canvas.toDataURL("image/png"), overlay, format: videoFormat, start: Number($("#video-start").value), layout }),
     });
     const t0 = Date.now();
     for (;;) {
@@ -4010,12 +4044,13 @@ $("#md-go").onclick = async () => {
   const [gName, gTags] = GENRES["Católica"][$("#md-genre").value];
   const [vName, vTags] = VOICE_TYPES.filter(([n]) => n !== "Instrumental")[$("#md-voice").value];
   const withMusic = $("#md-music").checked;
+  const original = $("#md-original .on")?.dataset.o !== "0";
   $("#md-setup").classList.add("hidden");
   $("#md-run").classList.remove("hidden");
   $("#md-done").classList.add("hidden");
   $("#md-bar").style.width = "3%";
   try {
-    const { jobId } = await api("/api/mass-ready", { method: "POST", body: JSON.stringify({ date: mdDate, genre: gName, genreTags: gTags, voice: vName, voiceTags: vTags, withMusic, duration: 120 }) });
+    const { jobId } = await api("/api/mass-ready", { method: "POST", body: JSON.stringify({ date: mdDate, genre: gName, genreTags: gTags, voice: vName, voiceTags: vTags, withMusic, original, duration: 120 }) });
     for (;;) {
       await sleep(2500);
       const j = await api(`/api/jobs/${jobId}`);

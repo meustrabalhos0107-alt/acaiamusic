@@ -143,3 +143,22 @@ export async function illustrate(prompt, seed = Math.floor(Math.random() * 2 ** 
   if (!r.ok) throw new Error("O gerador de imagens gratuito está ocupado agora. Tente de novo em 1 minuto.");
   return Buffer.from(await r.arrayBuffer());
 }
+
+// Clipe da capa: a imagem do tema vira um vídeo curto com movimento (LTX-Video no Modal)
+export function clipUrl() {
+  const s = getSettings();
+  return /acaiamusic-estudio-estudio/.test(s.modalUrl || "") ? s.modalUrl.replace("acaiamusic-estudio-estudio", "acaiamusic-clipe-clipe").replace(/\/+$/, "") : "";
+}
+export async function animateCover(imageBuf, prompt, format = "vertical") {
+  const url = clipUrl();
+  if (!url) throw new Error("O clipe animado precisa do estúdio no Modal.");
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: getSettings().modalKey, image: imageBuf.toString("base64"), prompt, format, seed: Math.floor(Math.random() * 2 ** 31) }),
+    signal: AbortSignal.timeout(15 * 60 * 1000),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.video) throw new Error(j.error || `o gerador de clipes respondeu ${r.status}`);
+  return Buffer.from(j.video, "base64");
+}

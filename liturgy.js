@@ -94,8 +94,49 @@ export async function getLiturgy(iso) {
   return out;
 }
 
-// Que momentos cantar e em que texto cada um se inspira
-export function massPlan(lit) {
+// Quebra um trecho em versos para cantar, só nos sinais de pontuação (as palavras ficam iguais)
+function singLines(t) {
+  return String(t)
+    .split(/(?<=[;:.!?])\s+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+// Salmo com o texto da liturgia, sem alteração: refrão do dia entre as estrofes
+function psalmFixed(ps) {
+  const refrain = singLines(ps.refrain);
+  const stanzas = String(ps.text || "")
+    .split(/\n+|\s+(?=[–—-]\s)/)
+    .map((s) => s.replace(/^[–—-]\s*/, "").trim())
+    .filter(Boolean);
+  const sections = [{ name: "Refrão", lines: refrain }];
+  for (const [k, st] of stanzas.entries()) {
+    if (sections.length >= 13) break;
+    const lines = singLines(st);
+    for (let i = 0; i < lines.length && sections.length < 13; i += 12) sections.push({ name: `Estrofe ${k + 1}`, lines: lines.slice(i, i + 12) });
+    sections.push({ name: "Refrão", lines: refrain });
+  }
+  return { title: ps.refrain.replace(/[!.]+$/, "").slice(0, 80) || "Salmo do dia", sections, references: [ps.ref].filter(Boolean), notes: `Salmo responsorial da liturgia do dia (${ps.ref}), texto sem alteração.`, official: true };
+}
+// Aclamação com o texto da liturgia, sem alteração: o refrão que vem na liturgia + o versículo do dia
+function acclamationFixed(text, lent, gospelRef) {
+  const lines = String(text || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const isRefrain = (l) => /^aleluia\b/i.test(l) || /^(glória|louvor|honra|salve)\b.*(cristo|jesus|senhor|verbo)/i.test(l);
+  let refrain = lines.filter(isRefrain);
+  const verse = lines.filter((l) => !isRefrain(l)).flatMap(singLines);
+  if (!refrain.length) refrain = [lent ? "Louvor a vós, ó Cristo, Rei da eterna glória!" : "Aleluia, aleluia, aleluia!"];
+  const sections = verse.length ? [{ name: "Refrão", lines: refrain }, { name: "Versículo", lines: verse }, { name: "Refrão", lines: refrain }] : [{ name: "Refrão", lines: refrain }];
+  return {
+    title: /^aleluia/i.test(refrain[0]) ? "Aleluia do dia" : refrain[0].replace(/[!.]+$/, "").slice(0, 80),
+    sections,
+    references: [gospelRef].filter(Boolean),
+    notes: verse.length ? "Aclamação da liturgia do dia, texto sem alteração." : "A fonte não trouxe o versículo da aclamação deste dia: só o refrão.",
+    official: true,
+  };
+}
+
+// Que momentos cantar e em que texto cada um se inspira.
+// original = true: Salmo e Aclamação usam o texto da liturgia sem alteração; false: a IA cria a letra.
+export function massPlan(lit, { original = true } = {}) {
   const R = lit.readings || {}, A = lit.antiphons || {}, P = lit.prayers || {};
   const gospel = R.gospel ? `${R.gospel.ref}: ${R.gospel.text}` : "";
   const noGloria = /advento|quaresma/i.test(lit.season) && !/solenidade|imaculada/i.test(lit.title);
@@ -107,23 +148,10 @@ export function massPlan(lit) {
     { moment: "Ato Penitencial (Kyrie)" },
     !noGloria && { moment: "Glória" },
     { moment: "Bíblia (Entrada da Palavra)", reading: gospel },
-    R.psalm && { moment: "Salmo Responsorial", idea: `Use EXATAMENTE este refrão do salmo do dia: "${R.psalm.refrain}"`, reading: `${R.psalm.ref} — Refrão: ${R.psalm.refrain}\n${R.psalm.text}` },
-    R.acclamation && {
-      // texto litúrgico: refrão (Aleluia ou, na Quaresma, louvor a Cristo) + o versículo do dia, sem invenção
-      moment: "Aclamação ao Evangelho",
-      fixed: (() => {
-        const verse = R.acclamation.split("\n").map((l) => l.trim()).filter((l) => l && !/^aleluia[, !.aleluia]*$/i.test(l));
-        const refrain = lent ? ["Louvor e honra a vós, Senhor Jesus!"] : ["Aleluia, aleluia, aleluia!"];
-        return {
-          title: lent ? "Louvor e honra a vós" : "Aleluia do dia",
-          sections: [{ name: "Refrão", lines: refrain }, { name: "Versículo", lines: verse.length ? verse : refrain }, { name: "Refrão", lines: refrain }],
-          references: [R.gospel?.ref].filter(Boolean),
-          notes: "Versículo da aclamação da liturgia do dia.",
-          official: true,
-        };
-      })(),
-    },
-    !R.acclamation && {
+    R.psalm && original && R.psalm.refrain && R.psalm.text && { moment: "Salmo Responsorial", fixed: psalmFixed(R.psalm) },
+    R.psalm && !(original && R.psalm.refrain && R.psalm.text) && { moment: "Salmo Responsorial", idea: `Use EXATAMENTE este refrão do salmo do dia: "${R.psalm.refrain}"`, reading: `${R.psalm.ref} — Refrão: ${R.psalm.refrain}\n${R.psalm.text}` },
+    original && { moment: "Aclamação ao Evangelho", fixed: acclamationFixed(R.acclamation, lent, R.gospel?.ref) },
+    !original && {
       moment: "Aclamação ao Evangelho",
       idea: [lent ? "Sem aleluia (tempo penitencial): use \"Louvor a vós, ó Cristo\"" : "", R.acclamation ? `Use o versículo da aclamação do dia: "${R.acclamation.split("\n").pop()}"` : ""].filter(Boolean).join(". "),
       reading: [R.acclamation && `Aclamação do dia: ${R.acclamation}`, gospel].filter(Boolean).join("\n\n"),

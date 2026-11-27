@@ -8,6 +8,8 @@ import { randomUUID } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
 import { stemsToMp3 } from "./audio.js";
 import { getSettings } from "./kaggle.js";
+import { animateCover } from "./hearing.js";
+import { existsSync } from "node:fs";
 
 const STEMS_HOST = process.env.STEMS_HOST || "nakas-demucs-playground.hf.space";
 const STEM_NAMES = ["vocals", "bass", "drums", "other"];
@@ -178,6 +180,9 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     if (!m) return res.status(400).json({ error: "Imagem do vídeo inválida." });
     const vertical = b.format !== "horizontal";
     const W = vertical ? 720 : 1280, H = vertical ? 1280 : 720;
+    // clipe animado: camada de cima transparente (textos) + clipe da imagem do tema por baixo
+    const om = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(b.overlay || ""));
+    const ill = om && song.illustration?.file ? song.illustration : null;
     const start = int(b.start, 0, Math.max(0, (song.duration || 60) - 5), 0);
     const len = Math.min(60, Math.max(5, (song.duration || 60) - start));
     const L = b.layout || {};
@@ -202,12 +207,46 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
       const tmp = path.join(os.tmpdir(), `acaia-${id}.png`);
       try {
         set({ status: "generating", message: "Montando o vídeo…" });
-        await fs.writeFile(tmp, Buffer.from(m[1], "base64"));
         const dir = MEDIA(song.id);
         mkdirSync(dir, { recursive: true });
-        const name = `video-${vertical ? "vertical" : "horizontal"}-${start}.mp4`;
+        // 1) clipe da capa (feito uma vez por imagem e formato, depois reaproveitado)
+        let clipFile = null, clipError = "", clipMade = false;
+        if (ill) {
+          const tag = vertical ? "v" : "h";
+          const f = path.join(dir, `clipe-${tag}-${path.parse(ill.file).name}.mp4`);
+          if (existsSync(f)) clipFile = f;
+          else {
+            const began = Date.now();
+            const tick = setInterval(() => {
+              const s = Math.round((Date.now() - began) / 1000);
+              // de 0 a 60%: a GPU criando o clipe (estimativa de ~4 min, contando o estúdio ligar)
+              set({ status: "generating", message: `Criando o clipe animado da capa com IA… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} (a 1ª vez leva de 3 a 6 min)`, progress: Math.min(60, Math.floor((s / 240) * 60)) });
+            }, 3000);
+            try {
+              const vid = await animateCover(await fs.readFile(path.join(dir, ill.file)), ill.prompt || song.title, vertical ? "vertical" : "horizontal");
+              for (const old of await fs.readdir(dir)) if (old.startsWith(`clipe-${tag}-`)) await fs.rm(path.join(dir, old), { force: true });
+              await fs.writeFile(f, vid);
+              clipFile = f;
+              clipMade = true;
+            } catch (e) {
+              clipError = e.message;
+              console.log("Clipe da capa falhou, vídeo com a imagem parada:", e.message);
+            } finally {
+              clearInterval(tick);
+            }
+          }
+        }
+        const p0 = clipMade ? 60 : 0; // a barra continua de onde o clipe parou
+        await fs.writeFile(tmp, Buffer.from((clipFile ? om : m)[1], "base64"));
+        const name = `video-${vertical ? "vertical" : "horizontal"}-${start}${clipFile ? "-clipe" : ""}.mp4`;
         const filter = [
-          `[0:v]scale=${OW}:${OH},setsar=1,format=yuv420p,fade=t=in:st=0:d=0.8,fade=t=out:st=${len - 1}:d=1[bg]`,
+          ...(clipFile
+            ? [
+                `[2:v]scale=${OW}:${OH}:force_original_aspect_ratio=increase,crop=${OW}:${OH},fps=${FPS},setsar=1,format=yuv420p[clipv]`,
+                `[0:v]scale=${OW}:${OH},format=rgba[ov]`,
+                `[clipv][ov]overlay=0:0:shortest=1,format=yuv420p,fade=t=in:st=0:d=0.8,fade=t=out:st=${len - 1}:d=1[bg]`,
+              ]
+            : [`[0:v]scale=${OW}:${OH},setsar=1,format=yuv420p,fade=t=in:st=0:d=0.8,fade=t=out:st=${len - 1}:d=1[bg]`]),
           `[1:a]atrim=0:${len},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1,afade=t=out:st=${len - 2}:d=2,aformat=channel_layouts=stereo,asplit=2[aout][av]`,
           // equalizador (barras de frequência) com reflexo
           `[av]aformat=channel_layouts=mono,showfreqs=s=${wave.w}x${half}:mode=bar:ascale=cbrt:fscale=log:colors=0xf472b6:win_size=1024:rate=${FPS},format=yuva420p,split[f1][f2]`,
@@ -226,21 +265,22 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
             "-threads", "1", "-filter_complex_threads", "1",
             "-loop", "1", "-framerate", String(FPS), "-t", String(len), "-i", tmp,
             "-ss", String(start), "-t", String(len), "-i", path.join(SONGS_DIR, `${song.id}.mp3`),
+            ...(clipFile ? ["-stream_loop", "-1", "-t", String(len), "-i", clipFile] : []),
             "-filter_complex", filter,
             "-map", "[vout]", "-map", "[aout]",
             "-t", String(len), "-r", String(FPS),
-            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage", "-crf", "28", "-threads", "1",
+            "-c:v", "libx264", "-preset", "ultrafast", ...(clipFile ? [] : ["-tune", "stillimage"]), "-crf", "28", "-threads", "1",
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
             path.join(dir, name),
           ],
           20 * 60 * 1000,
           (secs) => {
             const pct = Math.min(99, Math.floor((secs / len) * 100));
-            if (pct !== lastPct) set({ status: "generating", message: `Montando o vídeo… ${pct}%`, progress: pct }), (lastPct = pct);
+            if (pct !== lastPct) set({ status: "generating", message: `Montando o vídeo${clipFile ? " com o clipe" : ""}… ${pct}%`, progress: Math.floor(p0 + (pct * (100 - p0)) / 100) }), (lastPct = pct);
           },
         );
         const url = `/audio/media/${song.id}/${name}`;
-        set({ status: "done", message: "Vídeo pronto!", url });
+        set({ status: "done", message: clipError ? `Vídeo pronto, com a imagem parada (o clipe não deu certo: ${clipError.slice(0, 120)})` : "Vídeo pronto!", url, clipError: clipError || undefined });
       } catch (e) {
         console.error("Erro vídeo:", e.message);
         set({ status: "error", error: "Não consegui montar o vídeo: " + e.message.slice(0, 200) });

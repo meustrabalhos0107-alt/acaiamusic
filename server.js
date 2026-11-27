@@ -6,7 +6,7 @@ import path from "node:path";
 import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client, handle_file } from "@gradio/client";
-import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, illustrationPrompt, refineLyrics, sanitizeChords, writeLyrics } from "./lyrics.js";
+import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, ideaMusicTags, illustrationPrompt, refineLyrics, sanitizeChords, splitIdea, writeLyrics } from "./lyrics.js";
 import { masterOrPlain } from "./audio.js";
 import { chordSheetFromAudio, hearingUrl, illustrate, lyricScore, listen } from "./hearing.js";
 import { createRegistro, registroPage } from "./registro.js";
@@ -164,9 +164,11 @@ app.post("/api/lyrics", async (req, res) => {
     return res.status(400).json({ error: "Escreva o tema do canto ou cole a leitura do dia." });
   }
   try {
-    const plan = await writeLyrics({ idea, options, language: String(b.language || "pt"), duration: Number(b.duration) || 60 });
-    plan.styles = buildTags(options, plan.styles).split(", ").slice(0, 14);
-    res.json(plan);
+    const parts = idea ? await splitIdea(idea) : null;
+    const lyricIdea = parts && (parts.melody || parts.music) ? parts.lyrics || (options.mode === "livre" ? idea : "") : idea;
+    const plan = await writeLyrics({ idea: lyricIdea, options, language: String(b.language || "pt"), duration: Number(b.duration) || 60 });
+    plan.styles = buildTags(options, plan.styles, ideaMusicTags(parts)).split(", ").slice(0, 14);
+    res.json({ ...plan, ideaParts: parts });
   } catch (e) {
     lyricsError(res, e);
   }
@@ -369,6 +371,17 @@ async function generateOn15Spaces({ params, options, language, reference }, set)
 }
 
 async function runJob(id, { plan, duration, language, meta, options, reference, spec = {}, check = false, replaceId = null }) {
+  // texto livre: o que é melodia, música ou letra (da criação e, no "Refazer", do pedido de ajuste)
+  const ideaParts = spec.ideaParts || (spec.idea ? await splitIdea(spec.idea).catch(() => null) : null);
+  const noteParts = spec.note ? await splitIdea(spec.note).catch(() => null) : null;
+  const extraTags = [...ideaMusicTags(noteParts), ...ideaMusicTags(ideaParts)];
+  if (noteParts?.lyrics && plan?.sections?.length && options.voice !== "Instrumental") {
+    try {
+      plan = await refineLyrics({ plan, custom: noteParts.lyrics, options, language });
+    } catch (e) {
+      console.log("Ajuste da letra pedido no Refazer falhou, fica a letra de antes:", e.message);
+    }
+  }
   const startedAt = Date.now();
   // Pedidos antigos da fila guardaram 40 BPM por engano (andamento "auto" virava 40): descarta
   if (options.bpm === 40 && (options.tempo || "auto") === "auto") options = { ...options, bpm: 0 };
@@ -402,7 +415,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     const seconds = Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, Math.max(duration, needed)));
     if (needed > duration) console.log(`Letra longa (${syllables} sílabas): duração ${duration}s → ${seconds}s para caber tudo`);
     const params = {
-      prompt: buildTags(options, plan.styles),
+      prompt: buildTags(options, plan.styles, extraTags),
       lyrics: options.voice === "Instrumental" ? "[instrumental]" : toAceLyrics(order),
       audio_duration: seconds,
       infer_step: options.quality === "high" ? 16 : 8,
@@ -582,6 +595,8 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       // Ficha técnica: tudo o que foi escolhido para criar esta música
       spec: {
         idea: String(spec.idea || "").slice(0, 1500),
+        ...(ideaParts ? { ideaParts } : {}),
+        ...(spec.note ? { note: String(spec.note).slice(0, 1500), noteParts } : {}),
         lyricsSource: ["ia", "propria", "missal"].includes(spec.lyricsSource) ? spec.lyricsSource : "ia",
         language,
         requestedDuration: seconds,
@@ -1058,6 +1073,7 @@ app.post("/api/songs/:id/redo", async (req, res) => {
   if (!song.options || !song.sections) return res.status(400).json({ error: "Esta música é antiga e não guardou como foi feita. Use ✎ Nova versão." });
   if (queue.some((q) => q.input?.replaceId === song.id)) return res.status(409).json({ error: "Esta música já está sendo refeita." });
   const check = req.body?.check !== false && Boolean(hearingUrl());
+  const note = String(req.body?.note || "").trim().slice(0, 1500);
   const input = {
     plan: { title: song.title, styles: song.styles || [], sections: song.sections, references: song.references || [], notes: song.notes || "" },
     duration: Number(song.spec?.requestedDuration) || song.duration || 120,
@@ -1065,7 +1081,7 @@ app.post("/api/songs/:id/redo", async (req, res) => {
     meta: { cover: song.cover },
     options: cleanOptions(song.options), // normaliza opções de músicas antigas
     reference: null,
-    spec: { idea: song.spec?.idea, lyricsSource: song.spec?.lyricsSource },
+    spec: { idea: song.spec?.idea, ideaParts: song.spec?.ideaParts, lyricsSource: song.spec?.lyricsSource, note },
     check,
     replaceId: song.id,
   };
@@ -1372,7 +1388,7 @@ app.get("/api/liturgy", async (req, res) => res.json(await getLiturgy(String(req
 app.post("/api/mass-ready", async (req, res) => {
   const b = req.body || {};
   const lit = await getLiturgy(String(b.date || ""));
-  const plan = massPlan(lit);
+  const plan = massPlan(lit, { original: b.original !== false });
   const withMusic = b.withMusic === true;
   const duration = Math.max(MIN_SECONDS, Math.min(240, Number(b.duration) || 120));
   const id = randomUUID();

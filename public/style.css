@@ -1228,3 +1228,9 @@ dialog { max-width: calc(100vw - 16px); }
 /* Player: capa e nome abrem a música que está tocando */
 #player .p-track { cursor: pointer; }
 #player .p-track:active { opacity: 0.75; }
+
+/* Opção de clipe animado no vídeo de status */
+.video-clip-opt { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 4px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; }
+.video-clip-opt input { margin-top: 3px; width: auto; }
+.video-clip-opt span { display: grid; gap: 2px; }
+.video-clip-opt small { color: var(--muted); font-size: 0.74rem; }

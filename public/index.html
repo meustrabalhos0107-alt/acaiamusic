@@ -832,6 +832,7 @@
           <button class="btn ghost sm" id="video-listen">▶ Ouvir início do trecho</button>
           <p class="sub-label">Capa ilustrada <small class="sum" id="video-art-msg"></small></p>
           <button class="btn ghost sm" id="video-art">🎨 Criar outra imagem</button>
+          <label class="video-clip-opt"><input type="checkbox" id="video-clip" checked /> <span><b>🎞️ Clipe animado (IA)</b><small>A imagem do tema ganha vida: vento, nuvens, luz e água em movimento, ocupando a tela toda. A 1ª vez de cada música leva uns 3 a 6 min; depois fica guardado.</small></span></label>
           <p class="muted small">O vídeo leva a capa com uma imagem do tema da música, o título, o refrão, um equalizador animado e a marca d'água <b>ACAIAMUSIC</b>.</p>
           <button class="btn primary" id="btn-video">🎬 Criar vídeo de 1 minuto</button>
           <div class="stem-progress hidden" id="video-progress"><div class="progress"><div id="video-bar"></div></div><p id="video-msg" class="small"></p></div>
@@ -887,6 +888,20 @@
     </div>
   </dialog>
 
+  <!-- ============ REFAZER A MÚSICA ============ -->
+  <dialog id="redo-dialog" class="settings">
+    <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">🎯 Refazer</span>
+    <h2 id="rd-title">Refazer a música</h2>
+    <p class="muted small">Grava de novo com o mesmo estilo e as mesmas vozes. O Whisper confere se dá para entender a letra; se não der, grava outra vez (até 3) e fica a mais clara. A nova substitui a atual.</p>
+    <div class="field">
+      <label for="rd-note">O que mudar? <em class="muted">opcional · escreva livre</em></label>
+      <textarea id="rd-note" rows="4" maxlength="1500" placeholder="Ex.: melodia mais alegre que sobe no refrão; só violão e piano, mais lenta; trocar a palavra 'luz' por 'paz' na 2ª estrofe"></textarea>
+      <small class="muted">Eu separo sozinho o que é sobre a <b>melodia</b>, a <b>música</b> (instrumentos, ritmo, estilo) e a <b>letra</b>, e aplico cada parte no lugar certo.</small>
+    </div>
+    <div class="pane-actions"><button class="btn primary" id="rd-go">🎯 Refazer agora</button></div>
+  </dialog>
+
   <!-- ============ EDITAR UM PEDIDO DA FILA ============ -->
   <dialog id="qedit-dialog" class="settings lyric-open">
     <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
@@ -931,6 +946,13 @@
       <div class="grid-2">
         <div class="field"><label for="md-genre">Estilo dos cantos</label><select id="md-genre"></select></div>
         <div class="field"><label for="md-voice">Quem canta</label><select id="md-voice"></select></div>
+      </div>
+      <div class="field">
+        <label>Salmo e Aclamação ao Evangelho</label>
+        <div class="segmented" id="md-original">
+          <button type="button" class="on" data-o="1"><b>📖 Texto original da liturgia</b><small>Exatamente como está na liturgia do dia, sem alteração</small></button>
+          <button type="button" data-o="0"><b>✨ Letra criada pela IA</b><small>Uma letra nova inspirada no salmo e no Evangelho</small></button>
+        </div>
       </div>
       <label class="md-check"><input type="checkbox" id="md-music" checked /> <span><b>Gravar as músicas também</b><small>Cada canto vira música com voz. Leva alguns minutos por canto (o estúdio grátis liga sozinho).</small></span></label>
       <div class="pane-actions"><button class="btn primary" id="md-go">✨ Montar a Missa</button></div>
