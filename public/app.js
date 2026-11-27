@@ -1174,6 +1174,7 @@ async function loadLyricsLib() {
     state.lyricsLib = [];
   }
   $("#lyr-count").textContent = state.lyricsLib.length || "";
+  $("#ql-lyrics-n").textContent = state.lyricsLib.length || "";
 }
 async function saveLyric(entry) {
   if (!entry.text.trim()) return toast("A letra está vazia.", true);
@@ -4670,7 +4671,7 @@ let medleyIds = [];
 function drawMedley() {
   const byId = new Map(state.songs.map((s) => [s.id, s]));
   medleyIds = medleyIds.filter((id) => byId.has(id));
-  $("#md-list").innerHTML = medleyIds.length
+  $("#mx-list").innerHTML = medleyIds.length
     ? medleyIds
         .map((id, i) => {
           const s = byId.get(id);
@@ -4679,9 +4680,9 @@ function drawMedley() {
         })
         .join("")
     : `<li class="muted small">Escolha de 2 a 4 músicas.</li>`;
-  $("#md-go").disabled = medleyIds.length < 2;
+  $("#mx-go").disabled = medleyIds.length < 2;
 }
-$("#md-list").addEventListener("click", (e) => {
+$("#mx-list").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-a]");
   if (!b) return;
   const i = Number(b.dataset.i);
@@ -4692,7 +4693,7 @@ $("#md-list").addEventListener("click", (e) => {
   }
   drawMedley();
 });
-$("#md-add").onclick = () => {
+$("#mx-add").onclick = () => {
   const songs = [...state.songs].sort((x, y) => y.createdAt.localeCompare(x.createdAt));
   $("#medley-dialog").close();
   openPicker({
@@ -4710,31 +4711,31 @@ $("#md-add").onclick = () => {
 };
 $("#lib-medley").onclick = () => {
   drawMedley();
-  $("#md-progress").classList.add("hidden");
+  $("#mx-progress").classList.add("hidden");
   $("#medley-dialog").showModal();
 };
-$("#md-go").onclick = async (e) => {
+$("#mx-go").onclick = async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
-  $("#md-progress").classList.remove("hidden");
-  $("#md-msg").textContent = "Começando…";
-  $("#md-bar").style.width = "3%";
+  $("#mx-progress").classList.remove("hidden");
+  $("#mx-msg").textContent = "Começando…";
+  $("#mx-bar").style.width = "3%";
   try {
-    const { jobId } = await api("/api/medley", { method: "POST", body: JSON.stringify({ ids: medleyIds, seconds: Number($("#md-secs").value), title: $("#md-name").value.trim() }) });
+    const { jobId } = await api("/api/medley", { method: "POST", body: JSON.stringify({ ids: medleyIds, seconds: Number($("#mx-secs").value), title: $("#mx-name").value.trim() }) });
     for (;;) {
       await sleep(1500);
       const j = await api(`/api/jobs/${jobId}`);
       if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Cancelado.");
       const p = j.status === "done" ? 100 : j.progress ?? 5;
-      $("#md-msg").textContent = pctMsg(p, j.message);
-      $("#md-bar").style.width = p + "%";
+      $("#mx-msg").textContent = pctMsg(p, j.message);
+      $("#mx-bar").style.width = p + "%";
       if (j.status === "done") {
         state.songs.unshift(j.song);
         updateCount();
         renderLibrary();
         $("#medley-dialog").close();
         medleyIds = [];
-        $("#md-name").value = "";
+        $("#mx-name").value = "";
         toast("🎼 Medley pronto!");
         openSong(j.song);
         break;
@@ -4746,3 +4747,495 @@ $("#md-go").onclick = async (e) => {
     btn.disabled = medleyIds.length < 2;
   }
 };
+
+// =========================================================
+// AFINAÇÃO (YIN): a melodia da voz da IA e a voz da pessoa, nota por nota
+// Usado no Treino de voz e no "Tom para a minha voz".
+// =========================================================
+const NOTE_PT = ["Dó", "Dó#", "Ré", "Ré#", "Mi", "Fá", "Fá#", "Sol", "Sol#", "Lá", "Lá#", "Si"];
+const midiName = (m) => (m ? `${NOTE_PT[((Math.round(m) % 12) + 12) % 12]}${Math.floor(Math.round(m) / 12) - 1}` : "—");
+const toMidi = (f) => 69 + 12 * Math.log2(f / 440);
+// frequência fundamental de um trecho (0 = sem nota: silêncio, consoante, ruído)
+function yinPitch(buf, sr, W) {
+  const tmin = Math.floor(sr / 1000), tmax = Math.min(buf.length - W - 1, Math.floor(sr / 70));
+  let e = 0;
+  for (let i = 0; i < W; i++) e += buf[i] * buf[i];
+  if (Math.sqrt(e / W) < 0.012) return 0;
+  const d = new Float32Array(tmax + 2);
+  for (let tau = 1; tau <= tmax + 1; tau++) {
+    let s = 0;
+    for (let i = 0; i < W; i++) {
+      const x = buf[i] - buf[i + tau];
+      s += x * x;
+    }
+    d[tau] = s;
+  }
+  let run = 0;
+  d[0] = 1;
+  for (let tau = 1; tau <= tmax + 1; tau++) (run += d[tau]), (d[tau] = (d[tau] * tau) / (run || 1));
+  for (let tau = tmin; tau <= tmax; tau++) {
+    if (d[tau] < 0.15) {
+      while (tau + 1 <= tmax && d[tau + 1] < d[tau]) tau++;
+      const a = d[tau - 1], b = d[tau], c = d[tau + 1];
+      const den = a - 2 * b + c;
+      const p = tau + (den ? (a - c) / (2 * den) : 0);
+      return sr / p;
+    }
+  }
+  return 0;
+}
+// junta 4 amostras em 1 (a voz cabe folgada em ~12 kHz e o cálculo fica 16× mais leve)
+function decimate4(x) {
+  const y = new Float32Array(Math.floor(x.length / 4));
+  for (let i = 0; i < y.length; i++) y[i] = (x[4 * i] + x[4 * i + 1] + x[4 * i + 2] + x[4 * i + 3]) / 4;
+  return y;
+}
+const pitchCache = new Map();
+// melodia da voz da IA (faixa de voz separada): uma nota a cada 20 ms
+async function melodyTrack(song, onPct) {
+  const url = song.stems?.vocals;
+  if (!url) throw new Error("Separe as faixas primeiro (aba Faixas): preciso da voz sozinha para conhecer a melodia.");
+  if (pitchCache.has(url)) return pitchCache.get(url);
+  let buf;
+  try {
+    const raw = await fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status))));
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    buf = await ac.decodeAudioData(raw);
+    ac.close();
+  } catch {
+    throw new Error("Não consegui ler a faixa de voz desta música. Separe as faixas de novo (aba Faixas) e tente outra vez.");
+  }
+  const ch0 = buf.getChannelData(0), ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : ch0;
+  const mono = new Float32Array(ch0.length);
+  for (let i = 0; i < mono.length; i++) mono[i] = (ch0[i] + ch1[i]) / 2;
+  const x = decimate4(mono), sr = buf.sampleRate / 4;
+  const hop = Math.round(sr * 0.02), W = Math.round(sr * 0.027);
+  const n = Math.floor((x.length - W * 2) / hop);
+  const m = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    const f = yinPitch(x.subarray(k * hop, k * hop + W + Math.floor(sr / 70) + 2), sr, W);
+    m[k] = f > 60 && f < 1100 ? toMidi(f) : 0;
+    if (k % 400 === 0) (onPct?.(Math.round((k / n) * 100)), await sleep(0));
+  }
+  // tira notas soltas de 1 quadro (ruído)
+  for (let k = 1; k < n - 1; k++) if (m[k] && !m[k - 1] && !m[k + 1]) m[k] = 0;
+  const voiced = [...m].filter(Boolean).sort((a, b) => a - b);
+  const track = { m, hop: 0.02, lo: voiced[Math.floor(voiced.length * 0.08)] || 60, hi: voiced[Math.floor(voiced.length * 0.92)] || 72 };
+  pitchCache.set(url, track);
+  return track;
+}
+// microfone: devolve uma função que lê a nota cantada agora
+async function openMic() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const src = ac.createMediaStreamSource(stream);
+  const an = ac.createAnalyser();
+  an.fftSize = 4096;
+  src.connect(an);
+  const data = new Float32Array(an.fftSize);
+  const sr = ac.sampleRate / 4, W = Math.round(sr * 0.027);
+  return {
+    read() {
+      an.getFloatTimeDomainData(data);
+      const f = yinPitch(decimate4(data), sr, W);
+      return f > 60 && f < 1100 ? toMidi(f) : 0;
+    },
+    close() {
+      stream.getTracks().forEach((t) => t.stop());
+      ac.close();
+    },
+  };
+}
+// diferença em semitons, sem contar a oitava (homem cantando música de voz feminina, e o contrário)
+const pcDiff = (a, b) => ((((a - b) % 12) + 18) % 12) - 6;
+
+// ---------------- Treino de voz ----------------
+const tr = { mic: null, raf: 0, inst: null, guide: null, track: null, hist: [], score: [] };
+async function openTrainer(song) {
+  $("#tn-title").textContent = song.title;
+  $("#tn-result").classList.add("hidden");
+  $("#tn-go").disabled = true;
+  $("#tn-note").textContent = "—";
+  $("#tn-hint").textContent = "Preparando a melodia…";
+  $("#trainer-dialog").showModal();
+  try {
+    tr.track = await melodyTrack(song, (p) => ($("#tn-hint").textContent = `Lendo a melodia da voz… ${p}%`));
+    $("#tn-hint").textContent = "Coloque o fone, aperte Começar e cante junto. Verde = no tom.";
+    $("#tn-go").disabled = false;
+    tr.song = song;
+    drawTrainer(0);
+  } catch (e) {
+    $("#tn-hint").textContent = e.message;
+  }
+}
+function stopTrainer(showResult = true) {
+  cancelAnimationFrame(tr.raf);
+  tr.mic?.close();
+  tr.mic = null;
+  tr.inst?.pause();
+  tr.guide?.pause();
+  $("#tn-go").textContent = "▶ Começar";
+  if (!showResult || !tr.score.length) return;
+  // resultado: % do tempo no tom e os trechos que mais precisam de treino (janelas de 5 s)
+  const ok = tr.score.filter((s) => Math.abs(s.d) <= 0.5).length;
+  const pct = Math.round((ok / tr.score.length) * 100);
+  const win = new Map();
+  for (const s of tr.score) {
+    const k = Math.floor(s.t / 5);
+    const w = win.get(k) || { n: 0, bad: 0, dir: 0 };
+    w.n++;
+    if (Math.abs(s.d) > 0.5) (w.bad++, (w.dir += Math.sign(s.d)));
+    win.set(k, w);
+  }
+  const worst = [...win.entries()].filter(([, w]) => w.n >= 20 && w.bad / w.n > 0.35).sort((a, b) => b[1].bad / b[1].n - a[1].bad / a[1].n).slice(0, 3);
+  $("#tn-result").innerHTML =
+    `<b class="${pct >= 80 ? "good" : pct >= 60 ? "ok" : "bad"}">🎯 ${pct}% no tom</b>` +
+    (worst.length
+      ? `<p class="small">Trechos para treinar:</p>` +
+        worst.map(([k, w]) => `<button class="btn ghost sm" data-t="${k * 5}">▶ ${fmt(k * 5)}–${fmt(k * 5 + 5)} · ${Math.round((w.bad / w.n) * 100)}% fora · ${w.dir > 0 ? "você ficou acima: desça um pouco" : "você ficou abaixo: suba um pouco"}</button>`).join("")
+      : `<p class="small">Muito bem! Nenhum trecho com muitos erros.</p>`);
+  $("#tn-result").classList.remove("hidden");
+}
+async function startTrainer(from = 0) {
+  if (tr.mic) return stopTrainer();
+  const s = tr.song;
+  try {
+    tr.mic = await openMic();
+  } catch {
+    return toast("Permita o uso do microfone para treinar.", true, 6000);
+  }
+  audio.pause();
+  tr.inst = new Audio(s.stems?.instrumental || s.url);
+  tr.guide = $("#tn-guide").value !== "0" && s.stems?.vocals ? Object.assign(new Audio(s.stems.vocals), { volume: Number($("#tn-guide").value) }) : null;
+  tr.inst.currentTime = from;
+  if (tr.guide) tr.guide.currentTime = from;
+  tr.hist = [];
+  if (!from) tr.score = [];
+  $("#tn-result").classList.add("hidden");
+  await Promise.all([tr.inst.play(), tr.guide?.play()]);
+  tr.inst.onended = () => stopTrainer();
+  $("#tn-go").textContent = "■ Parar";
+  const loop = () => {
+    const t = tr.inst.currentTime;
+    const ref = tr.track.m[Math.round(t / tr.track.hop)] || 0;
+    const me = tr.mic.read();
+    let d = null;
+    if (me && ref) {
+      d = pcDiff(me, ref);
+      tr.score.push({ t, d });
+    }
+    // a voz da pessoa é desenhada na oitava da melodia (para comparar)
+    const shown = me ? (ref ? ref + d : me) : 0;
+    tr.hist.push({ t, m: shown, d });
+    if (tr.hist.length > 400) tr.hist.shift();
+    $("#tn-note").textContent = ref ? midiName(ref) : "·";
+    $("#tn-me").textContent = me ? midiName(me) : "—";
+    const live = tr.score.slice(-150);
+    $("#tn-live").textContent = live.length ? `${Math.round((live.filter((x) => Math.abs(x.d) <= 0.5).length / live.length) * 100)}% no tom agora` : "";
+    $("#tn-hint").textContent = d == null ? (ref ? "Cante! 🎤" : "…") : Math.abs(d) <= 0.5 ? "✓ No tom" : d > 0 ? `↓ Desça um pouco (${Math.abs(d).toFixed(1)} semitom)` : `↑ Suba um pouco (${Math.abs(d).toFixed(1)} semitom)`;
+    $("#tn-hint").className = d == null ? "" : Math.abs(d) <= 0.5 ? "good" : Math.abs(d) <= 1 ? "ok" : "bad";
+    drawTrainer(t);
+    tr.raf = requestAnimationFrame(loop);
+  };
+  tr.raf = requestAnimationFrame(loop);
+}
+function drawTrainer(t) {
+  const c = $("#tn-canvas");
+  const W = (c.width = c.clientWidth * devicePixelRatio), H = (c.height = c.clientHeight * devicePixelRatio);
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+  const T = tr.track;
+  if (!T) return;
+  const lo = Math.floor(T.lo) - 3, hi = Math.ceil(T.hi) + 3;
+  const y = (m) => H - ((m - lo) / (hi - lo)) * H;
+  const x = (tt) => ((tt - (t - 2)) / 6) * W;
+  // linhas das notas
+  ctx.font = `${11 * devicePixelRatio}px system-ui`;
+  for (let m = lo; m <= hi; m++) {
+    ctx.fillStyle = m % 12 === 0 ? "#ffffff22" : "#ffffff0a";
+    ctx.fillRect(0, y(m), W, 1);
+    if ([0, 4, 7].includes(m % 12)) (ctx.fillStyle = "#ffffff55"), ctx.fillText(midiName(m), 4, y(m) - 2);
+  }
+  // melodia (barras rosa)
+  ctx.fillStyle = "#f472b6aa";
+  const k0 = Math.max(0, Math.floor((t - 2) / T.hop)), k1 = Math.min(T.m.length, Math.ceil((t + 4) / T.hop));
+  for (let k = k0; k < k1; k++) if (T.m[k]) ctx.fillRect(x(k * T.hop), y(Math.round(T.m[k])) - 4 * devicePixelRatio, (W / 6) * T.hop + 1, 8 * devicePixelRatio);
+  // agora
+  ctx.fillStyle = "#ffffff66";
+  ctx.fillRect(x(t), 0, 2, H);
+  // voz da pessoa (verde no tom, amarelo perto, vermelho longe)
+  for (const h of tr.hist) {
+    if (!h.m) continue;
+    ctx.fillStyle = h.d == null ? "#ffffff88" : Math.abs(h.d) <= 0.5 ? "#4ade80" : Math.abs(h.d) <= 1 ? "#facc15" : "#f87171";
+    ctx.beginPath();
+    ctx.arc(x(h.t), y(h.m), 3.2 * devicePixelRatio, 0, 7);
+    ctx.fill();
+  }
+}
+$("#tn-go").onclick = () => startTrainer(0);
+$("#tn-result").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-t]");
+  if (b) (tr.mic && stopTrainer(false), startTrainer(Math.max(0, Number(b.dataset.t) - 2)));
+});
+$("#trainer-dialog").addEventListener("close", () => stopTrainer(false));
+$("#kk-train").onclick = () => dlgSong && openTrainer(dlgSong);
+
+// ---------------- Tom para a minha voz ----------------
+const myRange = () => JSON.parse(localStorage.getItem("acaia-voice-range") || "null");
+async function measureNote(btn, label) {
+  let mic;
+  try {
+    mic = await openMic();
+  } catch {
+    toast("Permita o uso do microfone.", true);
+    return null;
+  }
+  const notes = [];
+  const t0 = Date.now();
+  btn.disabled = true;
+  await new Promise((done) => {
+    const step = () => {
+      const s = (Date.now() - t0) / 1000;
+      const m = mic.read();
+      if (m) notes.push(m);
+      btn.textContent = `🎤 Segure a nota… ${Math.max(0, 4 - s).toFixed(1)} s ${m ? "· " + midiName(m) : ""}`;
+      if (s < 4) requestAnimationFrame(step);
+      else done();
+    };
+    step();
+  });
+  mic.close();
+  btn.disabled = false;
+  btn.textContent = label;
+  if (notes.length < 30) {
+    toast("Não ouvi uma nota firme. Cante 'aaa' bem perto do microfone, segurando a nota.", true, 6000);
+    return null;
+  }
+  notes.sort((a, b) => a - b);
+  return Math.round(notes[Math.floor(notes.length / 2)]);
+}
+function paintRange() {
+  const r = myRange() || {};
+  $("#rg-low-v").textContent = r.low ? midiName(r.low) : "—";
+  $("#rg-high-v").textContent = r.high ? midiName(r.high) : "—";
+  $("#rg-calc").disabled = !(r.low && r.high && r.high > r.low);
+}
+$("#rg-low").onclick = async (e) => {
+  const m = await measureNote(e.currentTarget, "🎤 Gravar a nota grave");
+  if (m) localStorage.setItem("acaia-voice-range", JSON.stringify({ ...(myRange() || {}), low: m })), paintRange();
+};
+$("#rg-high").onclick = async (e) => {
+  const m = await measureNote(e.currentTarget, "🎤 Gravar a nota aguda");
+  if (m) localStorage.setItem("acaia-voice-range", JSON.stringify({ ...(myRange() || {}), high: m })), paintRange();
+};
+function bestShift(mlo, mhi, low, high) {
+  let best = null;
+  for (let s = -6; s <= 6; s++)
+    for (const oct of [-24, -12, 0, 12]) {
+      const a = mlo + s + oct, b = mhi + s + oct;
+      const pen = Math.max(0, low - a) + Math.max(0, b - high) + Math.abs(s) * 0.08 + Math.abs(oct) * 0.004;
+      if (!best || pen < best.pen) best = { s, oct, pen, fits: a >= low && b <= high };
+    }
+  return best;
+}
+$("#rg-calc").onclick = async () => {
+  const song = dlgSong, r = myRange();
+  const out = $("#rg-out");
+  out.innerHTML = "Lendo a melodia da música…";
+  try {
+    const T = await melodyTrack(song, (p) => (out.textContent = `Lendo a melodia da música… ${p}%`));
+    const mlo = Math.round(T.lo), mhi = Math.round(T.hi);
+    const b = bestShift(mlo, mhi, r.low, r.high);
+    const base = song.chords?.key || (song.options?.key ? song.options.key.split(" ")[0] + (song.options.key.includes("minor") ? "m" : "") : "");
+    const newKey = base ? trChord(base, b.s) : "";
+    out.innerHTML = `<p>A melodia vai de <b>${midiName(mlo)}</b> a <b>${midiName(mhi)}</b>. A sua voz: <b>${midiName(r.low)}</b> a <b>${midiName(r.high)}</b>.</p>
+      <p class="rg-best">${b.s === 0 ? "✓ O tom original já é bom para você" : `Melhor tom para você: <b>${b.s > 0 ? "+" : ""}${b.s} semitom${Math.abs(b.s) > 1 ? "s" : ""}</b>`}${base ? ` · tom <b>${esc(newKey)}</b>${b.s ? ` (era ${esc(base)})` : ""}` : ""}${b.oct < 0 ? " · cantando uma oitava abaixo" : b.oct > 0 ? " · cantando uma oitava acima" : ""}</p>
+      ${b.fits ? "" : `<p class="small muted">Mesmo assim alguma nota fica no limite da sua voz; cante essas com calma.</p>`}
+      <div class="pane-actions">${b.s ? `<button class="btn primary sm" id="rg-use">🎸 Usar na cifra</button><button class="btn ghost sm" id="rg-audio">🎚️ Criar o áudio neste tom</button>` : ""}</div>`;
+    localStorage.setItem(`acaia-mykey-${song.id}`, String(b.s));
+    $("#rg-use") &&
+      ($("#rg-use").onclick = () => {
+        $("#range-dialog").close();
+        transposeBy = b.s;
+        selectTab("cifra");
+        renderChords();
+        toast(`🎸 Cifra no seu tom${newKey ? `: ${newKey}` : ""}`);
+      });
+    $("#rg-audio") &&
+      ($("#rg-audio").onclick = () => {
+        $("#range-dialog").close();
+        selectTab("editar");
+        $("#ed-st").value = b.s;
+        $("#ed-st").dispatchEvent(new Event("input"));
+        updateEditor();
+        toast("Tom ajustado no editor: confira e toque em criar a versão.", false, 5000);
+      });
+  } catch (e) {
+    out.innerHTML = `<p class="bad">${esc(e.message)}</p>${song.stems ? "" : `<button class="btn ghost sm" id="rg-stems">🎚️ Separar as faixas agora</button>`}`;
+    $("#rg-stems") && ($("#rg-stems").onclick = () => ($("#range-dialog").close(), selectTab("faixas"), $("#btn-stems").click()));
+  }
+};
+$("#chord-myvoice").onclick = () => {
+  paintRange();
+  $("#rg-out").innerHTML = "";
+  $("#range-dialog").showModal();
+  if (myRange()?.low && myRange()?.high) $("#rg-calc").click();
+};
+
+// ---------------- Música para uma pessoa ----------------
+$("#tribute-open").onclick = () => {
+  $("#tb-msg").textContent = "";
+  $("#tribute-dialog").showModal();
+};
+$("#tb-go").onclick = async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  $("#tb-msg").textContent = "Compondo a canção… (até 1 min)";
+  try {
+    const { jobId } = await api("/api/tribute", {
+      method: "POST",
+      body: JSON.stringify({ name: $("#tb-name").value, occasion: $("#tb-occasion").value, story: $("#tb-story").value, from: $("#tb-from").value, voice: $("#tb-voice").value }),
+    });
+    for (;;) {
+      await sleep(2000);
+      const j = await api(`/api/jobs/${jobId}`);
+      if (j.status === "error") throw new Error(j.error);
+      if (j.status === "done") {
+        $("#tribute-dialog").close();
+        toast(`💝 “${j.title}” está pronta na letra e entrou na fila de criação. Depois, crie o vídeo (História animada) para presentear!`, false, 8000);
+        refreshQueue();
+        break;
+      }
+    }
+  } catch (err) {
+    $("#tb-msg").textContent = "";
+    toast(err.message, true, 7000);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ---------------- Terço cantado ----------------
+const MYST_OF_DAY = ["gloriosos", "gozosos", "dolorosos", "gloriosos", "luminosos", "dolorosos", "gozosos"];
+const MYST_NAME = { gozosos: "Gozosos", dolorosos: "Dolorosos", gloriosos: "Gloriosos", luminosos: "Luminosos" };
+const todayBR = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+function paintTerco() {
+  const d = $("#tc-date").value || todayBR();
+  const auto = MYST_OF_DAY[new Date(d + "T12:00:00Z").getUTCDay()];
+  const wd = new Date(d + "T12:00:00Z").toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" });
+  $("#tc-kind").options[0].textContent = `Do dia (${wd}: ${MYST_NAME[auto]})`;
+}
+$("#terco-open").onclick = () => {
+  $("#tc-date").value = todayBR();
+  $("#tc-genre").innerHTML = GENRES["Católica"].map(([n], i) => `<option value="${i}">${esc(n)}</option>`).join("");
+  paintTerco();
+  $("#tc-setup").classList.remove("hidden");
+  $("#tc-run").classList.add("hidden");
+  $("#terco-dialog").showModal();
+};
+$("#tc-date").onchange = paintTerco;
+$("#tc-go").onclick = async () => {
+  const [gName, gTags] = GENRES["Católica"][$("#tc-genre").value];
+  $("#tc-setup").classList.add("hidden");
+  $("#tc-run").classList.remove("hidden");
+  $("#tc-done").classList.add("hidden");
+  $("#tc-bar").style.width = "3%";
+  try {
+    const { jobId } = await api("/api/terco", { method: "POST", body: JSON.stringify({ date: $("#tc-date").value, kind: $("#tc-kind").value, voice: $("#tc-voice").value, genre: gName, genreTags: gTags }) });
+    for (;;) {
+      await sleep(2500);
+      const j = await api(`/api/jobs/${jobId}`);
+      const p = j.status === "done" ? 100 : j.progress != null ? j.progress : Math.round(((j.step || 0) / (j.total || 1)) * 100);
+      $("#tc-msg").textContent = j.status === "error" ? `⚠️ ${j.error}` : pctMsg(p, j.message);
+      $("#tc-bar").style.width = Math.max(3, p) + "%";
+      $("#tc-steps").innerHTML = (j.items || []).map((it) => `<li class="${it.kind}"><i>${it.error ? "⚠️" : it.kind === "song" ? "🎵" : "📝"}</i>${esc(it.moment)}<small>${esc(it.error || it.title)}</small></li>`).join("");
+      if (j.status === "error") throw new Error(j.error);
+      if (j.status === "done") {
+        $("#tc-done").classList.remove("hidden");
+        $("#tc-see").onclick = async () => {
+          $("#terco-dialog").close();
+          await Promise.all([loadSetlists(), loadLyricsLib(), loadSongs()]);
+          showView("setlists");
+          const sl = state.setlists.find((s) => s.id === j.setlistId);
+          if (sl) openSetlist(sl);
+        };
+        toast("📿 Terço cantado pronto!", false, 5000);
+        break;
+      }
+    }
+  } catch (err) {
+    toast(err.message, true, 8000);
+  }
+};
+
+// ---------------- Salmo de hoje ----------------
+let psalmInfo = null;
+async function loadPsalm() {
+  try {
+    psalmInfo = await api("/api/salmo");
+  } catch {
+    return;
+  }
+  const d = psalmInfo.days.find((x) => x.date === psalmInfo.today);
+  const box = $("#psalm-today");
+  box.classList.toggle("hidden", !psalmInfo.enabled && !d);
+  if (!d) {
+    $("#pt-ref").textContent = "";
+    $("#pt-refrain").textContent = psalmInfo.enabled ? "O Salmo de hoje é gravado sozinho de madrugada." : "Gravação automática desligada";
+    $("#pt-status").textContent = psalmInfo.enabled ? "Ainda não foi gravado hoje." : "";
+  } else {
+    $("#pt-ref").textContent = ` · ${d.ref}`;
+    $("#pt-refrain").textContent = d.refrain;
+    $("#pt-status").textContent = d.song ? `${d.title} · ${fmt(d.song.duration || 0)}` : d.pending ? "Sendo gravado agora…" : "Não ficou pronto: grave de novo nas configurações.";
+    if (d.song && !state.songs.some((s) => s.id === d.song.id)) state.songs.unshift(d.song);
+  }
+  $("#pt-play").disabled = $("#pt-share").disabled = !d?.song;
+  $("#pt-play").onclick = () => d?.song && play(d.song);
+  $("#pt-share").onclick = () => d?.song && shareFile(d.song.url, `Salmo ${d.ref}.mp3`, "audio/mpeg", `📖 *Salmo de hoje* (${d.ref})\n\n_${d.refrain}_\n\n${d.title}\nCantado no ACAIAMUSIC`);
+  if (d?.pending) setTimeout(loadPsalm, 60_000);
+}
+$("#pt-cfg").onclick = () => {
+  const p = psalmInfo || {};
+  $("#ps-on").checked = p.enabled !== false;
+  $("#ps-voice").value = p.voice || "Feminina";
+  $("#ps-genre").innerHTML = GENRES["Católica"].map(([n], i) => `<option value="${i}" ${n === p.genre ? "selected" : ""}>${esc(n)}</option>`).join("");
+  $("#ps-hist").innerHTML = (p.days || []).map((d) => `<li><span><b>${esc(d.date.split("-").reverse().join("/"))} · ${esc(d.ref)}</b><small>${esc(d.refrain)}</small></span>${d.song ? `<button class="btn ghost sm" data-id="${d.song.id}">▶</button>` : `<small>${d.pending ? "gravando…" : "—"}</small>`}</li>`).join("") || `<li class="muted small">Nenhum ainda.</li>`;
+  $("#psalm-dialog").showModal();
+};
+$("#ps-hist").addEventListener("click", (e) => {
+  const id = e.target.closest("[data-id]")?.dataset.id;
+  const d = psalmInfo?.days.find((x) => x.song?.id === id);
+  if (d) play(d.song);
+});
+$("#ps-save").onclick = async () => {
+  const [gName, gTags] = GENRES["Católica"][$("#ps-genre").value];
+  try {
+    await api("/api/salmo", { method: "PUT", body: JSON.stringify({ enabled: $("#ps-on").checked, voice: $("#ps-voice").value, genre: gName, genreTags: gTags }) });
+    $("#psalm-dialog").close();
+    toast($("#ps-on").checked ? "📖 O Salmo do dia vai ser gravado sozinho toda madrugada." : "Gravação automática do Salmo desligada.");
+    loadPsalm();
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
+$("#ps-now").onclick = async () => {
+  try {
+    const d = await api("/api/salmo/now", { method: "POST" });
+    toast(`📖 Salmo de hoje (${d.ref}) ${d.songId ? "na fila de criação" : ""}`, false, 5000);
+    $("#psalm-dialog").close();
+    refreshQueue();
+    setTimeout(loadPsalm, 3000);
+  } catch (e) {
+    toast(e.message, true, 7000);
+  }
+};
+loadPsalm();
+
+// atalhos da tela inicial
+const openLibTab = (tab) => {
+  showView("library");
+  document.querySelector(`#lib-switch [data-l="${tab}"]`)?.click();
+};
+$("#ql-lyrics").onclick = () => openLibTab("lyrics");
+$("#ql-albums").onclick = () => openLibTab("albums");
+$("#ql-queue").onclick = () => $("#lib-queue").click();

@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import compression from "compression";
 import fs from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -126,8 +127,16 @@ app.post("/api/logout", (_req, res) => {
 });
 app.use(["/api", "/audio"], (req, res, next) => (authed(req) ? next() : res.status(401).json({ error: "Entre com a senha do ACAIAMUSIC.", login: true })));
 
+// Página e dados comprimidos (gzip): o app abre ~4× mais leve no celular. O áudio já é comprimido (MP3).
+app.use(compression({ filter: (req, res) => !req.path.startsWith("/audio/") && compression.filter(req, res) }));
 // arquivos públicos (o .well-known/assetlinks.json é exigido pelo APK do Android)
-app.use(express.static(path.join(here, "public"), { dotfiles: "allow" }));
+// fontes e ícones não mudam: ficam guardados no aparelho por 30 dias
+app.use(
+  express.static(path.join(here, "public"), {
+    dotfiles: "allow",
+    setHeaders: (res, file) => /\.(woff2?|ttf|png|svg|ico|webp|jpg)$/i.test(file) && res.setHeader("Cache-Control", "public, max-age=2592000"),
+  }),
+);
 app.get("/keyboard.js", (_req, res) => res.type("text/javascript").sendFile(path.join(here, "keyboard.js"))); // lista de batidas do teclado, usada também no app
 app.use("/audio", express.static(SONGS_DIR));
 
@@ -1652,6 +1661,192 @@ app.post("/api/mass-ready", async (req, res) => {
   } catch (e) {
     console.error("Missa pronta:", e?.message || e);
     set({ status: "error", error: e?.message || "Não consegui montar a Missa." });
+  }
+});
+
+// ---------- Música para uma pessoa (homenagem) ----------
+// A pessoa conta a história de alguém e a ocasião; a IA compõe uma canção com o nome e a
+// história, e ela entra na fila de criação. Depois dá para fazer o vídeo (história animada).
+const TRIBUTES = {
+  aniversario: { label: "Aniversário", genre: "Pop", genreTags: "uplifting pop", moods: ["Alegre", "Grato"], moodTags: ["joyful", "warm"], tone: "alegre e cheia de carinho, celebrando a vida da pessoa" },
+  batizado: { label: "Batizado", genre: "Canto Litúrgico", genreTags: "gentle acoustic worship", moods: ["Terno", "Grato"], moodTags: ["tender", "peaceful"], tone: "terna, agradecendo a Deus pela vida da criança e pedindo a sua proteção" },
+  comunhao: { label: "Primeira Comunhão", genre: "Louvor", genreTags: "gentle catholic worship", moods: ["Alegre", "Orante"], moodTags: ["joyful", "prayerful"], tone: "alegre e orante, celebrando o encontro com Jesus na Eucaristia" },
+  crisma: { label: "Crisma", genre: "Louvor", genreTags: "modern catholic worship", moods: ["Confiante"], moodTags: ["hopeful", "uplifting"], tone: "confiante, sobre o Espírito Santo e a missão de testemunhar a fé" },
+  quinze: { label: "15 anos", genre: "Pop", genreTags: "emotional pop ballad", moods: ["Emocionante"], moodTags: ["emotional", "hopeful"], tone: "emocionante, sobre a menina que vira mulher, os sonhos e a família" },
+  casamento: { label: "Casamento", genre: "Balada", genreTags: "romantic wedding ballad", moods: ["Romântico"], moodTags: ["romantic", "tender"], tone: "romântica, sobre o amor do casal e a bênção de Deus para a nova família" },
+  bodas: { label: "Bodas", genre: "Balada", genreTags: "romantic acoustic ballad", moods: ["Grato", "Romântico"], moodTags: ["nostalgic", "tender"], tone: "grata e romântica, lembrando a história do casal e os anos juntos" },
+  maes: { label: "Dia das Mães", genre: "Balada", genreTags: "heartfelt acoustic ballad", moods: ["Grato"], moodTags: ["heartfelt", "warm"], tone: "agradecida e emocionante, sobre o amor e os cuidados da mãe" },
+  pais: { label: "Dia dos Pais", genre: "Balada", genreTags: "heartfelt acoustic ballad", moods: ["Grato"], moodTags: ["heartfelt", "warm"], tone: "agradecida e emocionante, sobre o exemplo e o amor do pai" },
+  formatura: { label: "Formatura", genre: "Pop", genreTags: "uplifting pop anthem", moods: ["Vitorioso"], moodTags: ["triumphant", "hopeful"], tone: "vitoriosa, sobre a caminhada, o esforço e o futuro" },
+  luto: { label: "Saudade (7º dia / luto)", genre: "Canto Litúrgico", genreTags: "gentle sacred ballad", moods: ["Sereno", "Esperança"], moodTags: ["peaceful", "hopeful"], tone: "serena e cheia de esperança cristã na ressurreição, lembrando com carinho quem partiu, sem desespero" },
+  amizade: { label: "Amizade", genre: "Pop acústico", genreTags: "acoustic pop", moods: ["Alegre"], moodTags: ["warm", "joyful"], tone: "alegre e sincera, sobre a amizade e as histórias vividas juntos" },
+  agradecimento: { label: "Agradecimento", genre: "Louvor", genreTags: "acoustic worship", moods: ["Grato"], moodTags: ["grateful", "warm"], tone: "agradecida, reconhecendo o bem que a pessoa fez" },
+};
+const VOICE_TAGS = { Feminina: ["warm female vocals"], Masculina: ["warm male vocals"], Dueto: ["male and female duet vocals"], Coral: ["mixed choir"], Infantil: ["children's choir"] };
+app.post("/api/tribute", async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || "").trim().slice(0, 80);
+  const T = TRIBUTES[b.occasion];
+  const story = String(b.story || "").trim().slice(0, 2500);
+  if (!name) return res.status(400).json({ error: "Escreva o nome da pessoa." });
+  if (!T) return res.status(400).json({ error: "Escolha a ocasião." });
+  if (story.length < 15) return res.status(400).json({ error: "Conte um pouco da história da pessoa (algumas frases)." });
+  const voice = VOICE_TAGS[b.voice] ? b.voice : "Feminina";
+  const from = String(b.from || "").trim().slice(0, 80);
+  const options = cleanOptions({
+    mode: "livre", genre: T.genre, genreTags: T.genreTags, moods: T.moods, moodTags: T.moodTags, voice, voiceTags: VOICE_TAGS[voice], quality: "high", form: "Refrão + estrofes",
+  });
+  const idea = `Canção de homenagem para ${name} (${T.label}). Tom: ${T.tone}.
+Use o NOME "${name}" no refrão (de forma natural e cantável) e conte a história abaixo nas estrofes, com detalhes concretos dela (sem inventar fatos que não estão aqui).${from ? `\nQuem oferece a música: ${from} (pode aparecer na última estrofe, falando com ${name}).` : ""}
+História: ${story}`;
+  const id = randomUUID();
+  const job = { status: "generating", message: `Compondo a canção para ${name}…`, createdAt: Date.now(), progress: 10 };
+  jobs.set(id, job);
+  res.json({ jobId: id });
+  try {
+    const plan = await writeLyrics({ idea, options, language: "pt", duration: 150 });
+    const sid = randomUUID();
+    enqueueSong(sid, { plan, duration: 150, language: "pt", meta: {}, options, reference: null, spec: { idea, lyricsSource: "ia", tribute: { name, occasion: b.occasion, from } } }, { label: `${plan.title} (para ${name})` });
+    Object.assign(job, { status: "done", progress: 100, message: "Letra pronta! A música entrou na fila de criação.", title: plan.title, songJobId: sid, updatedAt: Date.now() });
+  } catch (e) {
+    Object.assign(job, { status: "error", error: e instanceof LyricsError ? e.message : "Não consegui compor agora: " + e.message, updatedAt: Date.now() });
+  }
+});
+
+// ---------- Salmo do dia automático ----------
+// Todo dia (a partir das 4 h, horário de Brasília) o app grava o Salmo da liturgia com o texto
+// exato. O servidor grátis dorme quando ninguém usa: um despertador do GitHub (gratuito) o acorda
+// de madrugada, e ao acordar ele confere se o Salmo de hoje já foi gravado.
+const PSALM_DB = path.join(DATA_DIR, "salmo.json");
+const brDate = (ms = Date.now()) => new Date(ms - 3 * 3600_000).toISOString().slice(0, 10);
+async function loadPsalmCfg() {
+  try {
+    return { enabled: true, voice: "Feminina", genre: "Canto Litúrgico", genreTags: "", days: {}, ...JSON.parse(await fs.readFile(PSALM_DB, "utf8")) };
+  } catch {
+    return { enabled: true, voice: "Feminina", genre: "Canto Litúrgico", genreTags: "", days: {} };
+  }
+}
+let psalmBusy = false;
+async function dailyPsalm(force = false) {
+  if (psalmBusy) return;
+  psalmBusy = true;
+  try {
+    const cfg = await loadPsalmCfg();
+    const today = brDate();
+    const hour = new Date(Date.now() - 3 * 3600_000).getUTCHours();
+    if ((!cfg.enabled && !force) || cfg.days[today]?.songId || (hour < 4 && !force)) return;
+    const lit = await getLiturgy(today);
+    const ps = lit.readings?.psalm;
+    const item = massPlan(lit, { original: true }).find((p) => p.moment === "Salmo Responsorial");
+    if (!ps?.text || !item?.fixed) return console.log("Salmo do dia: a liturgia de hoje ainda não está disponível.");
+    const options = cleanOptions({ mode: "catolica", moment: "Salmo Responsorial", season: lit.season, occasion: lit.title, genre: cfg.genre, genreTags: cfg.genreTags || undefined, voice: cfg.voice, voiceTags: VOICE_TAGS[cfg.voice] || [], quality: "high" });
+    const sid = randomUUID();
+    enqueueSong(sid, { plan: cleanPlan(item.fixed, false), duration: 150, language: "pt", meta: {}, options, reference: null, spec: { idea: `Salmo do dia · ${lit.title}`, lyricsSource: "missal", psalmOf: today } }, { label: `Salmo do dia · ${ps.ref}` });
+    cfg.days[today] = { songId: sid, ref: ps.ref, refrain: ps.refrain, title: lit.title, at: new Date().toISOString() };
+    cfg.days = Object.fromEntries(Object.entries(cfg.days).sort().slice(-30));
+    await fs.writeFile(PSALM_DB, JSON.stringify(cfg, null, 2));
+    console.log(`Salmo do dia (${today}, ${ps.ref}) entrou na fila de criação.`);
+  } catch (e) {
+    console.log("Salmo do dia falhou:", e.message);
+  } finally {
+    psalmBusy = false;
+  }
+}
+setTimeout(() => dailyPsalm(), 25_000).unref();
+setInterval(() => dailyPsalm(), 30 * 60_000).unref();
+app.get("/api/salmo", async (_req, res) => {
+  const cfg = await loadPsalmCfg();
+  const songs = await loadSongs();
+  const days = Object.entries(cfg.days)
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 7)
+    .map(([date, d]) => {
+      const song = songs.find((s) => s.id === d.songId);
+      return { date, ...d, song: song || null, pending: !song && queue.some((q) => q.id === d.songId) };
+    });
+  res.json({ enabled: cfg.enabled, voice: cfg.voice, genre: cfg.genre, today: brDate(), days });
+});
+app.put("/api/salmo", async (req, res) => {
+  const cfg = await loadPsalmCfg();
+  const b = req.body || {};
+  if (typeof b.enabled === "boolean") cfg.enabled = b.enabled;
+  if (VOICE_TAGS[b.voice]) cfg.voice = b.voice;
+  if (b.genre) (cfg.genre = String(b.genre).slice(0, 40)), (cfg.genreTags = String(b.genreTags || "").slice(0, 160));
+  await fs.writeFile(PSALM_DB, JSON.stringify(cfg, null, 2));
+  if (cfg.enabled) dailyPsalm();
+  res.json({ ok: true, enabled: cfg.enabled });
+});
+app.post("/api/salmo/now", async (_req, res) => {
+  await dailyPsalm(true);
+  const cfg = await loadPsalmCfg();
+  const d = cfg.days[brDate()];
+  if (!d) return res.status(503).json({ error: "A liturgia de hoje ainda não está disponível. Tente mais tarde." });
+  res.json(d);
+});
+
+// ---------- Terço cantado: os 5 mistérios do dia, cada um com um canto curto ----------
+const MYSTERIES = {
+  gozosos: { name: "Mistérios Gozosos", list: [["A Anunciação do Anjo a Nossa Senhora", "Lc 1,26-38"], ["A Visitação de Nossa Senhora a sua prima Isabel", "Lc 1,39-56"], ["O Nascimento de Jesus em Belém", "Lc 2,1-20"], ["A Apresentação do Menino Jesus no Templo", "Lc 2,22-38"], ["A Perda e o Encontro do Menino Jesus no Templo", "Lc 2,41-52"]] },
+  dolorosos: { name: "Mistérios Dolorosos", list: [["A Agonia de Jesus no Horto das Oliveiras", "Lc 22,39-46"], ["A Flagelação de Jesus", "Mc 15,15"], ["A Coroação de Espinhos", "Mt 27,27-31"], ["Jesus carregando a Cruz para o Calvário", "Jo 19,16-17"], ["A Crucifixão e Morte de Jesus", "Lc 23,33-46"]] },
+  gloriosos: { name: "Mistérios Gloriosos", list: [["A Ressurreição de Jesus", "Mc 16,1-8"], ["A Ascensão de Jesus ao Céu", "At 1,6-11"], ["A Vinda do Espírito Santo sobre Maria e os Apóstolos", "At 2,1-13"], ["A Assunção de Nossa Senhora ao Céu", "Ap 12,1"], ["A Coroação de Nossa Senhora como Rainha do Céu e da Terra", "Ap 12,1"]] },
+  luminosos: { name: "Mistérios Luminosos", list: [["O Batismo de Jesus no Rio Jordão", "Mt 3,13-17"], ["A Autorrevelação de Jesus nas Bodas de Caná", "Jo 2,1-12"], ["O Anúncio do Reino de Deus e o convite à conversão", "Mc 1,14-15"], ["A Transfiguração de Jesus", "Lc 9,28-36"], ["A Instituição da Eucaristia", "Lc 22,14-20"]] },
+};
+// domingo e quarta: gloriosos; segunda e sábado: gozosos; terça e sexta: dolorosos; quinta: luminosos
+const MYSTERY_OF_DAY = ["gloriosos", "gozosos", "dolorosos", "gloriosos", "luminosos", "dolorosos", "gozosos"];
+const ORD = ["1º", "2º", "3º", "4º", "5º"];
+app.post("/api/terco", async (req, res) => {
+  const b = req.body || {};
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || "")) ? b.date : brDate();
+  const kind = MYSTERIES[b.kind] ? b.kind : MYSTERY_OF_DAY[new Date(date + "T12:00:00Z").getUTCDay()];
+  const M = MYSTERIES[kind];
+  const voice = VOICE_TAGS[b.voice] ? b.voice : "Feminina";
+  const duration = Math.max(MIN_SECONDS, Math.min(150, Number(b.duration) || 90));
+  const id = randomUUID();
+  const job = { status: "generating", message: "Preparando o terço…", step: 0, total: 10, items: [], createdAt: Date.now() };
+  jobs.set(id, job);
+  const set = (p) => Object.assign(job, p, { updatedAt: Date.now() });
+  const weekday = new Date(date + "T12:00:00Z").toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" });
+  const setlist = {
+    id: randomUUID(),
+    ...cleanSetlist({ title: `Terço cantado · ${M.name} (${weekday})`, date, notes: "Um canto curto para cada mistério, para cantar entre as dezenas. Montado pelo ACAIAMUSIC.", items: M.list.map(([t], i) => ({ moment: `${ORD[i]} mistério: ${t}`.slice(0, 60) })) }),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  await updateSetlists((list) => [setlist, ...list]);
+  res.json({ jobId: id, setlistId: setlist.id, name: M.name });
+  const saveItem = (i, patch) => updateSetlists((list) => list.map((s) => (s.id === setlist.id ? { ...s, items: s.items.map((it, k) => (k === i ? { ...it, ...patch } : it)), updatedAt: new Date().toISOString() } : s)));
+  set({ setlistId: setlist.id });
+  const o = cleanOptions({ mode: "catolica", moment: "Livre (tema religioso)", season: "", genre: b.genre || "Louvor", genreTags: b.genreTags || "gentle marian worship ballad", voice, voiceTags: VOICE_TAGS[voice], quality: "high", form: "Refrão + estrofes", moods: ["Orante"], moodTags: ["prayerful", "tender"] });
+  try {
+    const plans = [];
+    for (const [i, [title, ref]] of M.list.entries()) {
+      set({ step: i + 1, progress: Math.floor((i / 10) * 100), message: `Compondo o canto do ${ORD[i]} mistério: ${title}` });
+      const idea = `Canto curto para o TERÇO, cantado no ${ORD[i]} ${M.name.replace("Mistérios", "Mistério").replace(/s$/, "")}: "${title}" (${ref}).
+Uma estrofe que contempla a cena do mistério (o que aconteceu, com os personagens e o sentido para a nossa fé) e um refrão mariano CURTO (2 linhas), fácil de repetir entre as Ave-Marias, pedindo a intercessão de Nossa Senhora. Linguagem simples e orante. Não reescreva a Ave-Maria.`;
+      let lyr = null;
+      for (let t = 0; t < 4 && !lyr; t++) {
+        try {
+          lyr = await writeLyrics({ idea, options: { ...o, reading: `${title} (${ref})` }, language: "pt", duration });
+        } catch (e) {
+          if (!(e instanceof LyricsError) || t === 3) throw e;
+          const wait = (e.retryAfter || 20) + 2;
+          set({ message: `O compositor gratuito pediu uma pausa (${wait}s)…` });
+          await new Promise((r) => setTimeout(r, wait * 1000));
+        }
+      }
+      const text = lyr.sections.map((s) => `[${s.name}]\n${s.lines.join("\n")}`).join("\n\n");
+      const entry = { id: randomUUID(), ...cleanLyricEntry({ title: lyr.title, text, mode: "catolica", moment: "Livre (tema religioso)", season: "", references: [ref, ...(lyr.references || [])], notes: `${M.name} · ${ORD[i]} mistério: ${title}`, source: "ia" }), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      await updateLyricsLib((list) => [entry, ...list]);
+      await saveItem(i, { kind: "lyric", ref: entry.id });
+      plans.push(lyr);
+      job.items.push({ i, moment: title, title: lyr.title, kind: "lyric" });
+    }
+    const todo = M.list.map(([title], i) => ({ i, moment: `${ORD[i]} mistério: ${title}`.slice(0, 60), plan: plans[i] }));
+    await recordItems(setlist.id, todo, { ...b, voice, voiceTags: VOICE_TAGS[voice][0], genre: o.genre, genreTags: o.genreTags, duration }, set, job, `Terço cantado · ${M.name}`);
+    set({ status: "done", progress: 100, message: "Terço pronto!" });
+  } catch (e) {
+    console.error("Terço cantado:", e?.message || e);
+    set({ status: "error", error: e?.message || "Não consegui montar o terço." });
   }
 });
 

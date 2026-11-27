@@ -76,6 +76,22 @@
         </div>
       </div>
 
+      <div class="psalm-today hidden" id="psalm-today">
+        <span class="pt-ico">📖</span>
+        <div class="pt-txt"><small>Salmo de hoje<span id="pt-ref"></span></small><b id="pt-refrain"></b><em id="pt-status"></em></div>
+        <div class="pt-act">
+          <button id="pt-play" class="btn primary sm" title="Ouvir o Salmo de hoje, gravado sozinho com o texto exato da liturgia">▶ Ouvir</button>
+          <button id="pt-share" class="btn wa-btn sm" title="Enviar o áudio do Salmo com o refrão no WhatsApp (conversa, grupo ou Status)">WhatsApp</button>
+          <button id="pt-cfg" class="btn ghost sm" title="Ligar ou desligar a gravação automática, escolher voz e estilo, ver os últimos dias e gravar o de hoje agora">⚙</button>
+        </div>
+      </div>
+
+      <div class="quick-links">
+        <button class="quick" id="ql-lyrics" title="Abre as letras que você salvou (Biblioteca › Minhas letras)">📝 Minhas letras <em id="ql-lyrics-n"></em></button>
+        <button class="quick" id="ql-albums" title="Abre os seus álbuns (Biblioteca › Álbuns)">📀 Álbuns</button>
+        <button class="quick" id="ql-queue" title="Mostra a fila de criação: o que está sendo gravado agora">🎵 Fila de criação</button>
+      </div>
+
       <h2 class="section-title">O que você quer criar hoje?</h2>
       <div class="actions">
         <button class="action-card mass-card" id="mass-open">
@@ -97,6 +113,18 @@
           <b>Música livre</b>
           <small>Aniversário, declaração, jingle, louvor… qualquer estilo, com letra e voz.</small>
           <span class="ac-go">Começar →</span>
+        </button>
+        <button class="action-card" id="tribute-open" title="Conte a história de alguém e a ocasião: a IA compõe e grava uma canção com o nome e a história da pessoa">
+          <span class="ac-icon ac-2"><svg viewBox="0 0 24 24"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0112 6a5.5 5.5 0 019.5 6c-2.5 4.5-9.5 9-9.5 9z"/></svg></span>
+          <b>💝 Música para alguém</b>
+          <small>Batizado, aniversário, bodas, 15 anos, saudade… uma canção com o nome e a história da pessoa.</small>
+          <span class="ac-go">Homenagear →</span>
+        </button>
+        <button class="action-card" id="terco-open" title="Os 5 mistérios do dia, cada um com um canto curto para cantar entre as dezenas; vira um repertório">
+          <span class="ac-icon ac-1"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="M12 15v6M9.5 18.5h5"/></svg></span>
+          <b>📿 Terço cantado</b>
+          <small>Os mistérios do dia com um canto curto para cada um, para rezar cantando.</small>
+          <span class="ac-go">Montar o terço →</span>
         </button>
         <button class="action-card" data-start="own">
           <span class="ac-icon ac-3"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></span>
@@ -716,7 +744,8 @@
       <div class="pane-actions hidden" id="chord-actions">
         <button class="btn ghost sm" id="copy-chords">⧉ Copiar cifra</button>
         <button class="btn ghost sm" id="print-chords">🖨 Imprimir / PDF</button>
-        <button class="btn ghost sm" onclick="document.getElementById('dlg-stage').click()">🎤 Modo palco</button>
+        <button class="btn ghost sm" onclick="document.getElementById('dlg-stage').click()" title="Tela cheia para tocar ao vivo: letra e cifra rolando no tempo da música, com a batida do teclado">🎤 Modo palco</button>
+        <button class="btn ghost sm" id="chord-myvoice" title="Você canta a sua nota mais grave e a mais aguda; o app calcula o melhor tom desta música para a sua voz">🎚️ Tom para a minha voz</button>
         <button class="btn wa-btn sm" id="wa-chords">Enviar cifra no WhatsApp</button>
       </div>
     </div>
@@ -797,6 +826,7 @@
         <button class="btn primary" id="kk-go-stems">🎚️ Separar o playback</button>
       </div>
       <div id="kk-studio" class="kk-studio hidden">
+        <button class="btn ghost sm kk-train-btn" id="kk-train" title="Cante junto e veja, nota por nota, se você está no tom (verde), perto (amarelo) ou fora (vermelho); no fim mostra os trechos para treinar">🎯 Treino de afinação</button>
         <div class="kk-tips">
           <span>🎧 Use <b>fone de ouvido</b> para o playback não vazar na gravação.</span>
           <label class="kk-opt"><input type="checkbox" id="kk-nophones" /> Estou sem fone</label>
@@ -957,6 +987,100 @@
     <div class="pane-actions"><button class="btn primary" id="rd-go">🎯 Refazer agora</button></div>
   </dialog>
 
+  <!-- ============ TREINO DE AFINAÇÃO ============ -->
+  <dialog id="trainer-dialog" class="settings trainer">
+    <button class="close" aria-label="Fechar" title="Fechar o treino" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">🎯 Treino de afinação</span>
+    <h2 id="tn-title"></h2>
+    <div class="tn-now">
+      <div><small>Nota da melodia</small><b id="tn-note">—</b></div>
+      <div><small>Você está cantando</small><b id="tn-me">—</b></div>
+      <div><small id="tn-live"></small><b id="tn-hint"></b></div>
+    </div>
+    <canvas id="tn-canvas"></canvas>
+    <p class="muted small">Rosa: a melodia. Bolinhas: a sua voz (verde = no tom, amarelo = perto, vermelho = fora). Pode cantar uma oitava acima ou abaixo: conta igual.</p>
+    <div class="pane-actions">
+      <button class="btn primary" id="tn-go" title="Toca o playback e começa a ouvir a sua voz; aperte de novo para parar e ver o resultado">▶ Começar</button>
+      <select id="tn-guide" title="Com a voz da IA baixinha fica mais fácil achar a melodia"><option value="0.25">com a voz da IA baixinha</option><option value="0">só o playback</option></select>
+    </div>
+    <div id="tn-result" class="tn-result hidden"></div>
+  </dialog>
+
+  <!-- ============ TOM PARA A MINHA VOZ ============ -->
+  <dialog id="range-dialog" class="settings">
+    <button class="close" aria-label="Fechar" title="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">🎚️ Tom para a minha voz</span>
+    <h2>Qual tom fica bom para você?</h2>
+    <p class="muted small">Cante "aaa" segurando a nota por 4 segundos, sem forçar. O app guarda a sua extensão e calcula o tom de cada música.</p>
+    <div class="rg-steps">
+      <div><span>1. A nota mais <b>grave</b> que você canta com conforto</span><b id="rg-low-v">—</b><button class="btn ghost sm" id="rg-low" title="Grava 4 segundos e mede a sua nota mais grave">🎤 Gravar a nota grave</button></div>
+      <div><span>2. A nota mais <b>aguda</b> que você canta com conforto</span><b id="rg-high-v">—</b><button class="btn ghost sm" id="rg-high" title="Grava 4 segundos e mede a sua nota mais aguda">🎤 Gravar a nota aguda</button></div>
+    </div>
+    <div class="pane-actions"><button class="btn primary" id="rg-calc" title="Compara a melodia desta música com a sua extensão e sugere quantos semitons subir ou descer">🎯 Calcular o tom desta música</button></div>
+    <div id="rg-out" class="rg-out"></div>
+  </dialog>
+
+  <!-- ============ MÚSICA PARA ALGUÉM ============ -->
+  <dialog id="tribute-dialog" class="settings">
+    <button class="close" aria-label="Fechar" title="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">💝 Música para alguém</span>
+    <h2>Uma canção com a história da pessoa</h2>
+    <div class="field"><label for="tb-name">Nome da pessoa</label><input type="text" id="tb-name" maxlength="80" placeholder="Ex.: Dona Maria, Pedrinho, Ana e João" /></div>
+    <div class="field"><label for="tb-occasion">Ocasião</label>
+      <select id="tb-occasion"><option value="aniversario">🎂 Aniversário</option><option value="batizado">💧 Batizado</option><option value="comunhao">🍞 Primeira Comunhão</option><option value="crisma">🔥 Crisma</option><option value="quinze">👑 15 anos</option><option value="casamento">💍 Casamento</option><option value="bodas">💞 Bodas</option><option value="maes">🌷 Dia das Mães</option><option value="pais">👔 Dia dos Pais</option><option value="formatura">🎓 Formatura</option><option value="luto">🕊️ Saudade (7º dia / luto)</option><option value="amizade">🤝 Amizade</option><option value="agradecimento">🙏 Agradecimento</option></select></div>
+    <div class="field"><label for="tb-story">A história <em class="muted">quanto mais detalhes, mais pessoal</em></label><textarea id="tb-story" rows="5" maxlength="2500" placeholder="Quem é, o que gosta, momentos marcantes, o jeito dela, o que você quer dizer… Ex.: Avó de 80 anos, faz o melhor bolo de fubá, criou 6 filhos, reza o terço todo dia na varanda."></textarea></div>
+    <div class="field-row">
+      <div class="field"><label for="tb-from">Quem oferece <em class="muted">opcional</em></label><input type="text" id="tb-from" maxlength="80" placeholder="Ex.: seus netos" /></div>
+      <div class="field"><label for="tb-voice">Voz</label><select id="tb-voice"><option>Feminina</option><option>Masculina</option><option>Dueto</option><option>Coral</option><option>Infantil</option></select></div>
+    </div>
+    <p class="muted small" id="tb-msg"></p>
+    <div class="pane-actions"><button class="btn primary" id="tb-go" title="A IA compõe a letra com o nome e a história e coloca a música na fila de criação">💝 Criar a canção</button></div>
+  </dialog>
+
+  <!-- ============ TERÇO CANTADO ============ -->
+  <dialog id="terco-dialog" class="settings">
+    <button class="close" aria-label="Fechar" title="Fechar (o terço continua sendo criado)" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">📿 Terço cantado</span>
+    <h2>Os mistérios do dia, cantados</h2>
+    <div id="tc-setup">
+      <p class="muted small">Um canto curto para cada um dos 5 mistérios (a cena do mistério e um refrão mariano para cantar entre as dezenas). Vira um repertório com letras e músicas.</p>
+      <div class="field-row">
+        <div class="field"><label for="tc-date">Dia</label><input type="date" id="tc-date" /></div>
+        <div class="field"><label for="tc-kind">Mistérios</label><select id="tc-kind"><option value="">Do dia</option><option value="gozosos">Gozosos</option><option value="dolorosos">Dolorosos</option><option value="gloriosos">Gloriosos</option><option value="luminosos">Luminosos</option></select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="tc-voice">Voz</label><select id="tc-voice"><option>Feminina</option><option>Masculina</option><option>Dueto</option><option>Coral</option></select></div>
+        <div class="field"><label for="tc-genre">Estilo</label><select id="tc-genre"></select></div>
+      </div>
+      <div class="pane-actions"><button class="btn primary" id="tc-go" title="Compõe os 5 cantos e grava as músicas (leva alguns minutos; pode fechar e acompanhar na fila)">📿 Montar o terço</button></div>
+    </div>
+    <div id="tc-run" class="hidden">
+      <div class="progress"><div id="tc-bar"></div></div>
+      <p id="tc-msg" class="small"></p>
+      <ul class="md-steps" id="tc-steps"></ul>
+      <div id="tc-done" class="hidden pane-actions"><button class="btn primary" id="tc-see" title="Abre o repertório do terço, com as letras e as músicas">Ver o terço →</button></div>
+    </div>
+  </dialog>
+
+  <!-- ============ SALMO DO DIA ============ -->
+  <dialog id="psalm-dialog" class="settings">
+    <button class="close" aria-label="Fechar" title="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">📖 Salmo do dia</span>
+    <h2>Gravação automática</h2>
+    <p class="muted small">Toda madrugada o app grava o Salmo da liturgia do dia, com o texto exato, e deixa pronto na tela inicial para ouvir e mandar no WhatsApp.</p>
+    <label class="check"><input type="checkbox" id="ps-on" /> <span><b>Gravar o Salmo do dia sozinho</b> · usa os créditos grátis do estúdio (1 música por dia)</span></label>
+    <div class="field-row">
+      <div class="field"><label for="ps-voice">Voz</label><select id="ps-voice"><option>Feminina</option><option>Masculina</option><option>Dueto</option><option>Coral</option></select></div>
+      <div class="field"><label for="ps-genre">Estilo</label><select id="ps-genre"></select></div>
+    </div>
+    <div class="pane-actions">
+      <button class="btn primary" id="ps-save" title="Salva as escolhas da gravação automática">Salvar</button>
+      <button class="btn ghost" id="ps-now" title="Grava o Salmo de hoje agora, sem esperar a madrugada">📖 Gravar o de hoje agora</button>
+    </div>
+    <p class="sub-label">Últimos dias</p>
+    <ul class="ps-hist" id="ps-hist"></ul>
+  </dialog>
+
   <!-- ============ OUTRAS VERSÕES (violão, piano, ao vivo) ============ -->
   <dialog id="variant-dialog" class="settings">
     <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
@@ -994,14 +1118,14 @@
     <span class="eyebrow">🎼 Medley</span>
     <h2>Juntar músicas</h2>
     <p class="muted small">De cada música entra o trecho do refrão. Todas ficam no tom da 1ª e passam de uma para outra com uma transição suave. Ótimo para entrada, comunhão longa ou abertura.</p>
-    <ol class="medley-list" id="md-list"></ol>
-    <button class="btn ghost sm" id="md-add">＋ Escolher músicas</button>
+    <ol class="medley-list" id="mx-list"></ol>
+    <button class="btn ghost sm" id="mx-add">＋ Escolher músicas</button>
     <div class="field-row">
-      <div class="field"><label for="md-secs">Trecho de cada música</label><select id="md-secs"><option value="30">30 s</option><option value="45" selected>45 s</option><option value="60">1 min</option><option value="90">1 min 30</option></select></div>
-      <div class="field"><label for="md-name">Nome <em class="muted">opcional</em></label><input type="text" id="md-name" maxlength="120" placeholder="Medley de Comunhão" /></div>
+      <div class="field"><label for="mx-secs">Trecho de cada música</label><select id="mx-secs"><option value="30">30 s</option><option value="45" selected>45 s</option><option value="60">1 min</option><option value="90">1 min 30</option></select></div>
+      <div class="field"><label for="mx-name">Nome <em class="muted">opcional</em></label><input type="text" id="mx-name" maxlength="120" placeholder="Medley de Comunhão" /></div>
     </div>
-    <div class="stem-progress hidden" id="md-progress"><div class="progress"><div id="md-bar"></div></div><p id="md-msg" class="small"></p></div>
-    <div class="pane-actions"><button class="btn primary" id="md-go">🎼 Criar medley</button></div>
+    <div class="stem-progress hidden" id="mx-progress"><div class="progress"><div id="mx-bar"></div></div><p id="mx-msg" class="small"></p></div>
+    <div class="pane-actions"><button class="btn primary" id="mx-go">🎼 Criar medley</button></div>
   </dialog>
 
   <!-- ============ EDITAR UM PEDIDO DA FILA ============ -->
@@ -1169,5 +1293,6 @@
   </dialog>
   <script type="module">import * as KB from "/keyboard.js"; window.KB = KB; dispatchEvent(new Event("kb-ready"));</script>
   <script src="/app.js"></script>
+  <script src="/help.js"></script>
 </body>
 </html>

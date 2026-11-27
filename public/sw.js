@@ -1,6 +1,6 @@
 ﻿// Service worker: deixa o app instalável e abre a interface mesmo offline.
-const CACHE = "acaiamusic-v65";
-const SHELL = ["/", "/index.html", "/style.css", "/app.js", "/manifest.json", "/icon.svg", "/icon-192.png"];
+const CACHE = "acaiamusic-v66";
+const SHELL = ["/", "/index.html", "/style.css", "/app.js", "/help.js", "/manifest.json", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
