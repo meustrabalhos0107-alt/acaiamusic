@@ -253,10 +253,41 @@ function sungOrder(sections) {
   return out;
 }
 
+// Versos longos (o Salmo e a Aclamação da liturgia chegam com 20 a 40 sílabas numa linha só)
+// fazem o estúdio atropelar as palavras: a voz sai embolada e robotizada. Aqui o verso é
+// quebrado em frases de até ~13 sílabas, nas vírgulas ou entre palavras, sem mudar o texto.
+const sylCount = (t) => (String(t).toLowerCase().match(/[aeiouáéíóúâêôãõàüy]+/g) || []).length;
+const BREAK_BEFORE = /^(e|que|para|pois|porque|mas|como|quando|onde|com|sobre|por|nos|no|na|em|ao|à|de|do|da|dos|das)$/i;
+function breakLine(line, max = 13) {
+  if (sylCount(line) <= max + 2) return [line];
+  // 1º: nas pausas da própria frase (vírgula, ponto e vírgula, dois-pontos)
+  const chunks = line.split(/(?<=[,;:])\s+/).filter(Boolean);
+  const out = [];
+  for (const c of chunks) {
+    const last = out[out.length - 1];
+    if (last && sylCount(last) + sylCount(c) <= max) out[out.length - 1] = `${last} ${c}`;
+    else out.push(c);
+  }
+  // 2º: o que ainda ficou longo é cortado entre palavras, perto do meio (de preferência antes de "e", "que", "para"…)
+  return out.flatMap(function cut(c) {
+    if (sylCount(c) <= max + 2) return [c];
+    const words = c.split(/\s+/);
+    const total = sylCount(c);
+    let best = -1, bestScore = Infinity, acc = 0;
+    for (let i = 1; i < words.length; i++) {
+      acc += sylCount(words[i - 1]);
+      const score = Math.abs(acc - total / 2) - (BREAK_BEFORE.test(words[i]) ? 2.5 : 0);
+      if (acc >= 4 && total - acc >= 4 && score < bestScore) (bestScore = score), (best = i);
+    }
+    if (best < 0) return [c];
+    return [...cut(words.slice(0, best).join(" ")), ...cut(words.slice(best).join(" "))];
+  });
+}
+
 function toAceLyrics(sections) {
   const parts = sections.map((s) => {
     const tag = tagFor(s.name);
-    const lines = s.lines.map((l) => singable(l.replace(/^\s*[\[(][^\])]{1,20}[\])]\s*[:\-–]?\s*/, ""))).filter(Boolean);
+    const lines = s.lines.map((l) => singable(l.replace(/^\s*[\[(][^\])]{1,20}[\])]\s*[:\-–]?\s*/, ""))).filter(Boolean).flatMap((l) => breakLine(l));
     const Tag = tag[0].toUpperCase() + tag.slice(1); // formato da documentação do ACE-Step: [Verse], [Chorus]…
     return lines.length ? `[${Tag}]\n${lines.join("\n")}` : `[${Tag}]\n[Instrumental]`;
   });
@@ -373,7 +404,11 @@ async function generateOn15Spaces({ params, options, language, reference }, set)
   throw lastErr || new Error("runs limit: todos os estúdios gratuitos estão no limite agora");
 }
 
-async function runJob(id, { plan, duration, language, meta, options, reference, spec = {}, check = false, replaceId = null }) {
+async function runJob(id, { plan, duration, language, meta, options, reference, spec = {}, check = null, replaceId = null }) {
+  // Revisão de pronúncia (o Whisper ouve antes de salvar e, se a letra não foi bem entendida, grava
+  // outra versão) vale para TODA música cantada, não só no "Refazer". Só o "Refazer" pode desligar.
+  const autoCheck = check == null;
+  if (autoCheck) check = options?.voice !== "Instrumental" && Boolean(hearingUrl());
   // texto livre: o que é melodia, música ou letra (da criação e, no "Refazer", do pedido de ajuste)
   const ideaParts = spec.ideaParts || (spec.idea ? await splitIdea(spec.idea).catch(() => null) : null);
   const noteParts = spec.note ? await splitIdea(spec.note).catch(() => null) : null;
@@ -515,7 +550,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     if (!raw) throw hfErr || new Error("runs limit: todos os estúdios gratuitos estão no limite agora");
     let pron = null;
     if (check && sung && hearingUrl()) {
-      const TAKES = 3, GOOD = 96;
+      const TAKES = autoCheck ? 2 : 3, GOOD = autoCheck ? 92 : 96; // automática: até 2 gravações (poupa os créditos)
       let best = null;
       for (let take = 1; take <= TAKES; take++) {
         set({ status: "generating", message: `Conferindo a pronúncia com o Whisper (versão ${take} de até ${TAKES})…` });
@@ -1397,7 +1432,7 @@ function textToPlan(title, text) {
 // e acompanha até cada canto terminar; a própria fila troca a letra pela música no repertório.
 async function recordItems(setlistId, todo, b, set, job, idea) {
   const musicOpts = (moment) =>
-    cleanOptions({ mode: "catolica", moment, season: b.season, occasion: b.occasion, genre: b.genre, genreTags: b.genreTags, voice: b.voice, voiceTags: b.voiceTags ? [b.voiceTags] : [], quality: "fast" });
+    cleanOptions({ mode: "catolica", moment, season: b.season, occasion: b.occasion, genre: b.genre, genreTags: b.genreTags, voice: b.voice, voiceTags: b.voiceTags ? [b.voiceTags] : [], quality: "high" });
   const tasks = todo.map((t) => {
     const sid = randomUUID();
     enqueueSong(sid, { plan: t.plan, duration: b.duration, language: "pt", meta: {}, options: musicOpts(t.moment), reference: null, spec: { idea, lyricsSource: t.plan.official ? "missal" : "ia" } }, { setlist: { id: setlistId, i: t.i }, label: t.moment });
@@ -1487,7 +1522,7 @@ app.post("/api/mass-ready", async (req, res) => {
   const options = (moment) =>
     cleanOptions({
       mode: "catolica", moment, season: lit.season, occasion: lit.title,
-      genre: b.genre, genreTags: b.genreTags, voice: b.voice, voiceTags: b.voiceTags ? [b.voiceTags] : [], quality: "fast",
+      genre: b.genre, genreTags: b.genreTags, voice: b.voice, voiceTags: b.voiceTags ? [b.voiceTags] : [], quality: "high",
     });
   try {
     const plans = [];

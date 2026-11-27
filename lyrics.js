@@ -450,6 +450,7 @@ async function reviewLyrics(draft, { system, language, brief }) {
   const user = `Você agora é o REVISOR desta letra, recém-escrita para o pedido abaixo. Leia em voz alta, verso por verso, e corrija:
 - versos sem sentido, frases incompletas ou que não se ligam ao verso anterior;
 - rimas forçadas que deixaram a frase estranha ou com ordem invertida (troque a rima, preserve o sentido);
+- ortografia e acentuação: cada palavra escrita do jeito certo, com todos os acentos e o hífen (ex.: "você", "coração", "dá-nos"), sem palavras inventadas, coladas ou com letras trocadas — o cantor pronuncia exatamente o que está escrito;
 - erros de gramática, concordância, regência e palavras usadas com sentido errado;
 - estrofes que fogem da ideia central do refrão ou se repetem sem acrescentar nada;
 - métrica: versos correspondentes com número parecido de sílabas, para caber na mesma melodia.
