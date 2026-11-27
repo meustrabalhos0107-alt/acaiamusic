@@ -7,7 +7,7 @@ import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client, handle_file } from "@gradio/client";
 import { LANG_NAMES, SUNG_LANGS, translateLyrics } from "./lyrics.js";
-import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, ideaMusicTags, illustrationPrompt, refineLyrics, sanitizeChords, splitIdea, writeLyrics } from "./lyrics.js";
+import { ARRANGEMENTS, OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, ideaMusicTags, illustrationPrompt, refineLyrics, sanitizeChords, splitIdea, writeLyrics } from "./lyrics.js";
 import { masterOrPlain } from "./audio.js";
 import { chordSheetFromAudio, hearingUrl, illustrate, lyricScore, listen, lyricTimeline } from "./hearing.js";
 import { createRegistro, registroPage } from "./registro.js";
@@ -685,6 +685,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       spec: {
         idea: String(spec.idea || "").slice(0, 1500),
         ...(spec.translatedFrom ? { translatedFrom: spec.translatedFrom } : {}),
+        ...(spec.variantOf ? { variantOf: spec.variantOf } : {}),
         ...(ideaParts ? { ideaParts } : {}),
         ...(spec.note ? { note: String(spec.note).slice(0, 1500), noteParts } : {}),
         lyricsSource: ["ia", "propria", "missal"].includes(spec.lyricsSource) ? spec.lyricsSource : "ia",
@@ -1193,6 +1194,44 @@ app.post("/api/songs/:id/translate", async (req, res) => {
     if (e.status) return res.status(e.status).json({ error: e.message });
     lyricsError(res, e);
   }
+});
+// Outra versão da mesma música (só violão, só piano, ao vivo na igreja): vira uma MÚSICA NOVA,
+// com a mesma letra, tom e andamento; a original continua igual
+app.post("/api/songs/:id/variant", async (req, res) => {
+  const kind = String(req.body?.kind || "");
+  const A = ARRANGEMENTS[kind];
+  if (!A) return res.status(400).json({ error: "Escolha a versão." });
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  if (!song.options || !song.sections) return res.status(400).json({ error: "Esta música é antiga e não guardou como foi feita. Use ✎ Nova versão." });
+  const o = cleanOptions(song.options);
+  const options = cleanOptions({
+    ...o,
+    arrangement: kind,
+    genre: A.genre,
+    genreTags: A.genreTags,
+    instruments: [],
+    instrumentTags: [],
+    keyboardStyle: 0, // a batida do teclado é escolhida de novo, combinando com a versão
+    quality: "high",
+    bpm: o.bpm && kind !== "aovivo" ? Math.max(50, Math.round(o.bpm * 0.92)) : o.bpm, // acústica: um pouco mais calma
+  });
+  const title = `${song.title} (${A.label.toLowerCase()})`;
+  const id = randomUUID();
+  enqueueSong(
+    id,
+    {
+      plan: { title, styles: [], sections: song.sections, references: song.references || [], notes: song.notes || "" },
+      duration: Number(song.spec?.requestedDuration) || song.duration || 120,
+      language: song.spec?.language || "pt",
+      meta: { cover: song.cover },
+      options,
+      reference: null,
+      spec: { idea: song.spec?.idea, ideaParts: song.spec?.ideaParts, lyricsSource: song.spec?.lyricsSource, variantOf: { id: song.id, title: song.title, kind } },
+    },
+    { label: title },
+  );
+  res.json({ jobId: id, title });
 });
 // Gravar a música cantada no idioma escolhido: vira uma MÚSICA NOVA (a original continua igual)
 app.post("/api/songs/:id/sing", async (req, res) => {

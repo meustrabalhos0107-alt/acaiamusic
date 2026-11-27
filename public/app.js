@@ -2227,6 +2227,7 @@ function openSong(song) {
   $("#dlg-fav").onclick = () => toggleFav(song);
   $("#dlg-album").onclick = () => albumsForSong(song);
   $("#dlg-redo").onclick = () => redoSong(song);
+  $("#dlg-variant").onclick = () => variantSong(song);
   $("#dlg-registro").onclick = () => registroSong(song);
   $("#dlg-reuse").onclick = () => {
     if (song.options) applySpec(song);
@@ -3106,14 +3107,14 @@ $("#kk-mix").onclick = async (e) => {
     });
     const { jobId } = await api(`/api/songs/${song.id}/karaoke`, {
       method: "POST",
-      body: JSON.stringify({ audio: data, offset: kk.offset + Number($("#kk-sync").value) / 1000, voiceGain: Number($("#kk-gain").value), reverb: kkReverb, enhance: $("#kk-enhance").checked }),
+      body: JSON.stringify({ audio: data, offset: kk.offset + Number($("#kk-sync").value) / 1000, voiceGain: Number($("#kk-gain").value), reverb: kkReverb, enhance: $("#kk-enhance").checked, duet: kkDuet }),
     });
     const t0 = Date.now();
     for (;;) {
       await sleep(1500);
       const j = await api(`/api/jobs/${jobId}`);
       if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Música cancelada.");
-      const kkPct = j.status === "done" ? 100 : j.progress != null ? j.progress : Math.min(92, 12 + ((Date.now() - t0) / 1000 / 30) * 80);
+      const kkPct = j.status === "done" ? 100 : j.progress != null ? j.progress : Math.min(92, 12 + ((Date.now() - t0) / 1000 / (kkDuet ? 150 : 30)) * 80);
       $("#kk-msg").textContent = pctMsg(kkPct, j.message);
       $("#kk-bar").style.width = kkPct + "%";
       if (j.status === "done") {
@@ -4635,3 +4636,113 @@ function renderQuality(song) {
       redoSongNow(song, fixes.join(" "), true);
     };
 }
+
+// ---- Dueto com a IA (karaokê): a IA canta a 2ª voz ----
+let kkDuet = "";
+$$("#kk-duet button").forEach((b) =>
+  b.addEventListener("click", () => {
+    kkDuet = b.dataset.d;
+    $$("#kk-duet button").forEach((x) => x.classList.toggle("on", x === b));
+  }),
+);
+
+// ---- Outras versões: só violão, só piano, ao vivo na igreja (vira música nova) ----
+function variantSong(song) {
+  $("#vr-title").textContent = `“${song.title}”`;
+  $$("#variant-dialog [data-kind]").forEach(
+    (b) =>
+      (b.onclick = async () => {
+        $("#variant-dialog").close();
+        try {
+          const r = await api(`/api/songs/${song.id}/variant`, { method: "POST", body: JSON.stringify({ kind: b.dataset.kind }) });
+          toast(`🎸 “${r.title}” entrou na fila de criação. A original continua igual.`, false, 6000);
+          refreshQueue();
+        } catch (e) {
+          toast(e.message, true, 7000);
+        }
+      }),
+  );
+  $("#variant-dialog").showModal();
+}
+
+// ---- Medley: trechos de 2 a 4 músicas no mesmo tom ----
+let medleyIds = [];
+function drawMedley() {
+  const byId = new Map(state.songs.map((s) => [s.id, s]));
+  medleyIds = medleyIds.filter((id) => byId.has(id));
+  $("#md-list").innerHTML = medleyIds.length
+    ? medleyIds
+        .map((id, i) => {
+          const s = byId.get(id);
+          return `<li><span><b>${esc(s.title)}</b><small>${esc([s.options?.moment, s.chords?.key || s.hearing?.key ? `tom ${s.chords?.key || s.hearing?.key}` : "", fmt(s.duration || 0)].filter(Boolean).join(" · "))}${i === 0 ? " · <em>tom do medley</em>" : ""}</small></span>
+          <button data-a="up" data-i="${i}" ${i ? "" : "disabled"} title="Subir">↑</button><button data-a="down" data-i="${i}" ${i < medleyIds.length - 1 ? "" : "disabled"} title="Descer">↓</button><button data-a="del" data-i="${i}" title="Tirar">✕</button></li>`;
+        })
+        .join("")
+    : `<li class="muted small">Escolha de 2 a 4 músicas.</li>`;
+  $("#md-go").disabled = medleyIds.length < 2;
+}
+$("#md-list").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-a]");
+  if (!b) return;
+  const i = Number(b.dataset.i);
+  if (b.dataset.a === "del") medleyIds.splice(i, 1);
+  else {
+    const j = b.dataset.a === "up" ? i - 1 : i + 1;
+    [medleyIds[i], medleyIds[j]] = [medleyIds[j], medleyIds[i]];
+  }
+  drawMedley();
+});
+$("#md-add").onclick = () => {
+  const songs = [...state.songs].sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  $("#medley-dialog").close();
+  openPicker({
+    eyebrow: "🎼 Medley",
+    title: "Músicas do medley (2 a 4)",
+    items: songs.map((s) => ({ id: s.id, label: s.title, sub: [s.options?.moment, s.genre, fmt(s.duration || 0)].filter(Boolean).join(" · "), checked: medleyIds.includes(s.id) })),
+    onSave: (set) => {
+      medleyIds = [...medleyIds.filter((id) => set.has(id)), ...songs.map((s) => s.id).filter((id) => set.has(id) && !medleyIds.includes(id))];
+      if (medleyIds.length > 4) toast("O medley usa até 4 músicas: ficaram as 4 primeiras.", true, 5000);
+      medleyIds = medleyIds.slice(0, 4);
+      drawMedley();
+      setTimeout(() => $("#medley-dialog").showModal(), 50);
+    },
+  });
+};
+$("#lib-medley").onclick = () => {
+  drawMedley();
+  $("#md-progress").classList.add("hidden");
+  $("#medley-dialog").showModal();
+};
+$("#md-go").onclick = async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  $("#md-progress").classList.remove("hidden");
+  $("#md-msg").textContent = "Começando…";
+  $("#md-bar").style.width = "3%";
+  try {
+    const { jobId } = await api("/api/medley", { method: "POST", body: JSON.stringify({ ids: medleyIds, seconds: Number($("#md-secs").value), title: $("#md-name").value.trim() }) });
+    for (;;) {
+      await sleep(1500);
+      const j = await api(`/api/jobs/${jobId}`);
+      if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Cancelado.");
+      const p = j.status === "done" ? 100 : j.progress ?? 5;
+      $("#md-msg").textContent = pctMsg(p, j.message);
+      $("#md-bar").style.width = p + "%";
+      if (j.status === "done") {
+        state.songs.unshift(j.song);
+        updateCount();
+        renderLibrary();
+        $("#medley-dialog").close();
+        medleyIds = [];
+        $("#md-name").value = "";
+        toast("🎼 Medley pronto!");
+        openSong(j.song);
+        break;
+      }
+    }
+  } catch (err) {
+    toast(err.message, true, 8000);
+  } finally {
+    btn.disabled = medleyIds.length < 2;
+  }
+};

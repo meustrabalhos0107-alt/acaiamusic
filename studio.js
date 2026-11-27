@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
 import { stemsToMp3 } from "./audio.js";
 import { getSettings } from "./kaggle.js";
-import { animateCover, illustrate } from "./hearing.js";
+import { animateCover, harmonize, illustrate } from "./hearing.js";
 import { storyboard } from "./lyrics.js";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
@@ -366,6 +366,131 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     return { url: `/audio/media/${song.id}/${name}`, animated, total, approximate: tl.approximate };
   }
 
+  // tom da música: tônica (0 = Dó) e se é menor
+  function toneOf(s) {
+    const raw = String(s.hearing?.key || s.chords?.key || s.options?.key || "").trim();
+    const m = /^([A-Ga-g](?:#|b)?)\s*(m(?!aj)|min|minor)?/.exec(raw);
+    if (!m) return null;
+    const n = m[1][0].toUpperCase() + m[1].slice(1);
+    if (NOTES[n] == null) return null;
+    return { tonic: NOTES[n], minor: Boolean(m[2]) || /minor/i.test(raw), name: raw.replace(/ major/i, "").replace(/ minor/i, "m") };
+  }
+  // ===== Medley: trechos de 2 a 4 músicas, no mesmo tom, emendados com transição suave =====
+  // De cada música entra o trecho do refrão (pela linha do tempo da letra); as outras são levadas
+  // ao tom da 1ª (mudando o tom sem mudar o andamento) e a passagem é um cruzamento de 3 s.
+  const NOTES = { C: 0, "C#": 1, Db: 1, D: 2, "D#": 3, Eb: 3, E: 4, F: 5, "F#": 6, Gb: 6, G: 7, "G#": 8, Ab: 8, A: 9, "A#": 10, Bb: 10, B: 11 };
+  function songKey(s) {
+    const raw = String(s.hearing?.key || s.chords?.key || s.options?.key || "").trim();
+    const m = /^([A-G](?:#|b)?)\s*(m(?!aj)|min|minor)?/i.exec(raw.replace(/^([a-g])/, (c) => c.toUpperCase()));
+    if (!m || NOTES[m[1]] == null) return null;
+    let pc = NOTES[m[1]];
+    const minor = Boolean(m[2]) || /minor/i.test(raw);
+    if (minor) pc = (pc + 3) % 12; // compara pelo tom maior relativo (Em ~ G)
+    return { pc, name: raw };
+  }
+  function excerptOf(s, tl, seconds) {
+    const d = Number(s.duration) || 120;
+    const lines = tl.lines || [];
+    const chorus = lines.find((l) => /refr|chorus|resposta|ant[ií]fona/i.test(l.sec)) || lines.find((l) => l.t > 5) || lines[0];
+    let a = chorus ? Math.max(0, chorus.t - 1.5) : Math.min(15, d * 0.15);
+    if (a + seconds > d - 1) a = Math.max(0, d - 1 - seconds);
+    // termina no fim de um verso (perto do tempo pedido), para não cortar no meio da frase
+    const target = a + seconds;
+    const ends = lines.map((l) => l.end + 0.8).filter((e) => e > a + seconds * 0.6 && e < Math.min(d, target + 6));
+    const b = Math.min(d, ends.length ? ends.reduce((x, y) => (Math.abs(y - target) < Math.abs(x - target) ? y : x)) : target);
+    const sung = lines.filter((l) => l.t >= a - 0.3 && l.end <= b + 0.5).map((l) => l.text);
+    return { a: Math.round(a * 100) / 100, b: Math.round(b * 100) / 100, lines: sung.filter((t, i) => sung.indexOf(t) === i) };
+  }
+  app.post("/api/medley", async (req, res) => {
+    const b = req.body || {};
+    const ids = (Array.isArray(b.ids) ? b.ids : []).map(String).slice(0, 4);
+    const all = await loadSongs();
+    const songs = ids.map((id) => all.find((s) => s.id === id)).filter(Boolean);
+    if (songs.length < 2) return res.status(400).json({ error: "Escolha de 2 a 4 músicas para o medley." });
+    const seconds = int(b.seconds, 20, 90, 45);
+    const { id, set } = newJob();
+    videoChain = videoChain.then(async () => {
+      const tmp = [];
+      try {
+        const parts = [];
+        for (const [k, s] of songs.entries()) {
+          set({ status: "generating", message: `Achando o refrão de “${s.title}” (${k + 1} de ${songs.length})…`, progress: Math.round((k / songs.length) * 40) });
+          const tl = await songTimeline(s);
+          parts.push({ s, ...excerptOf(s, tl, seconds) });
+        }
+        // tom: todas vão para o tom da 1ª (o menor caminho, até 6 semitons)
+        const k0 = songKey(songs[0]);
+        for (const p of parts) {
+          const k = songKey(p.s);
+          let shift = k0 && k ? (k0.pc - k.pc + 12) % 12 : 0;
+          if (shift > 6) shift -= 12;
+          p.shift = shift;
+        }
+        const X = 3; // segundos de cruzamento entre as músicas
+        set({ status: "generating", message: "Emendando as músicas no mesmo tom…", progress: 45 });
+        // 1) cada trecho cortado e no tom certo (WAV), 2) tudo emendado com cruzamento
+        for (const [i, p] of parts.entries()) {
+          const out = path.join(os.tmpdir(), `acaia-${id}-${i}.wav`);
+          tmp.push(out);
+          const len = p.b - p.a;
+          const fade = `afade=t=in:st=0:d=${i ? 0.4 : 1.5},afade=t=out:st=${(len - (i < parts.length - 1 ? 0.4 : 3)).toFixed(2)}:d=${i < parts.length - 1 ? 0.4 : 3}`;
+          const pitch = p.shift ? `rubberband=pitch=${Math.pow(2, p.shift / 12).toFixed(5)}:formant=preserved,` : "";
+          const args = (pf) => ["-ss", String(p.a), "-t", len.toFixed(2), "-i", path.join(SONGS_DIR, `${p.s.id}.mp3`), "-af", `aresample=44100,aformat=channel_layouts=stereo,${pf}${fade}`, "-c:a", "pcm_s16le", out];
+          try {
+            await ffmpeg(args(pitch));
+          } catch (e) {
+            if (!pitch) throw e;
+            // sem o rubberband: muda o tom pela taxa de amostragem e corrige o andamento
+            const r = Math.pow(2, p.shift / 12);
+            console.log("Medley: rubberband indisponível, usando o método simples:", e.message.slice(0, 120));
+            await ffmpeg(args(`asetrate=${Math.round(44100 * r)},aresample=44100,atempo=${(1 / r).toFixed(5)},`));
+          }
+          set({ status: "generating", message: "Emendando as músicas no mesmo tom…", progress: 45 + Math.round(((i + 1) / parts.length) * 35) });
+        }
+        const newId = randomUUID();
+        const inputs = tmp.flatMap((f) => ["-i", f]);
+        let chain = "[0:a]";
+        const filters = [];
+        for (let i = 1; i < tmp.length; i++) {
+          filters.push(`${chain}[${i}:a]acrossfade=d=${X}:c1=tri:c2=tri[m${i}]`);
+          chain = `[m${i}]`;
+        }
+        filters.push(`${chain}loudnorm=I=-14:TP=-1.2:LRA=11[out]`);
+        set({ status: "saving", message: "Salvando o medley…", progress: 85 });
+        await ffmpeg([...inputs, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "192k", path.join(SONGS_DIR, `${newId}.mp3`)], 10 * 60 * 1000);
+        const total = parts.reduce((a, p) => a + (p.b - p.a), 0) - X * (parts.length - 1);
+        const first = songs[0];
+        const medley = {
+          id: newId,
+          title: String(b.title || "").trim().slice(0, 120) || `Medley: ${songs.map((s) => s.title).join(" · ")}`.slice(0, 160),
+          styles: [],
+          sections: parts.map((p) => ({ name: p.s.title.slice(0, 40), lines: p.lines.length ? p.lines : ["♪"] })),
+          references: [],
+          notes: `Medley no tom de ${k0?.name || "da 1ª música"}: ${parts.map((p) => `${p.s.title} (${Math.round(p.b - p.a)} s${p.shift ? `, ${p.shift > 0 ? "+" : ""}${p.shift} semitons` : ""})`).join(" → ")}.`,
+          genre: "Medley",
+          ...(first.keyboard ? { keyboard: first.keyboard } : {}),
+          mood: first.mood || "",
+          voice: first.voice,
+          options: { ...(first.options || {}), key: first.options?.key || "" },
+          cover: Math.floor(Math.random() * 1e6),
+          favorite: false,
+          duration: Math.round(total),
+          createdAt: new Date().toISOString(),
+          spec: { medley: parts.map((p) => ({ id: p.s.id, title: p.s.title, start: p.a, end: p.b, shift: p.shift })), lyricsSource: first.spec?.lyricsSource || "ia", language: first.spec?.language || "pt", engine: "Medley (trechos das músicas)" },
+          url: `/audio/${newId}.mp3`,
+        };
+        await updateSongs((list) => [medley, ...list]);
+        set({ status: "done", message: "Medley pronto!", song: medley, progress: 100 });
+      } catch (e) {
+        console.error("Erro medley:", e.message);
+        set({ status: "error", error: "Não consegui montar o medley: " + e.message.slice(0, 200) });
+      } finally {
+        for (const f of tmp) fs.rm(f, { force: true }).catch(() => {});
+      }
+    });
+    res.json({ jobId: id });
+  });
+
   // ===== Vídeo para Status (1 min) =====
   app.post("/api/songs/:id/video", async (req, res) => {
     const song = (await loadSongs()).find((s) => s.id === req.params.id);
@@ -583,6 +708,11 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
     const gain = Math.max(-12, Math.min(12, Number(b.voiceGain) || 0));
     const reverb = REVERBS[b.reverb] ?? REVERBS.igreja;
     const enhance = b.enhance !== false;
+    // dueto: a IA canta a 2ª voz (terça acima ou abaixo) junto com a sua
+    const duet = b.duet === "up" || b.duet === "down" ? b.duet : "";
+    const tone = duet ? toneOf(song) : null;
+    if (duet && !song.stems?.vocals) return res.status(400).json({ error: "Para o dueto, separe as faixas (aba Faixas) primeiro." });
+    if (duet && !tone) return res.status(400).json({ error: "Não sei o tom desta música para fazer a 2ª voz. Gere a cifra (aba Cifra) e tente de novo." });
     const ext = m[1].includes("webm") ? "webm" : m[1].includes("ogg") ? "ogg" : m[1].includes("mp4") || m[1].includes("aac") ? "m4a" : "wav";
 
     const { id, set } = newJob();
@@ -612,24 +742,33 @@ export function registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, H
           `volume=${gain}dB`,
           "pan=stereo|c0=c0|c1=c0",
         ].join(",");
+        let harm = null;
+        if (duet) {
+          set({ message: `A IA está cantando a 2ª voz (terça ${duet === "up" ? "acima" : "abaixo"}, no tom de ${tone.name})… leva 1 a 3 min` });
+          const voc = await fs.readFile(path.join(SONGS_DIR, song.stems.vocals.replace(/^\/audio\//, "")));
+          harm = path.join(dir, "segunda-voz-ia.flac");
+          await fs.writeFile(harm, await harmonize(voc, { tonic: tone.tonic, minor: tone.minor, dir: duet }));
+        }
+        // a 2ª voz entra um pouco mais baixa e levemente para o lado, com o mesmo ambiente
+        const harmChain = ["aresample=48000", "aformat=channel_layouts=mono", "highpass=f=110", "equalizer=f=3000:width_type=o:width=1.5:g=-2", ...(reverb ? [reverb] : []), "volume=-5dB", "pan=stereo|c0=0.8*c0|c1=1.0*c0"].join(",");
         const filter = [
           `[0:a]${voice}[v]`,
           "[1:a]aresample=48000,volume=-1.5dB[i]",
-          "[v][i]amix=inputs=2:duration=longest:normalize=0,loudnorm=I=-14:TP=-1.2:LRA=11[out]",
+          ...(harm ? [`[2:a]${harmChain}[h]`, "[v][i][h]amix=inputs=3:duration=longest:normalize=0,loudnorm=I=-14:TP=-1.2:LRA=11[out]"] : ["[v][i]amix=inputs=2:duration=longest:normalize=0,loudnorm=I=-14:TP=-1.2:LRA=11[out]"]),
         ].join(";");
-        set({ message: "Juntando a sua voz com o playback…" });
+        set({ message: harm ? "Juntando a sua voz, a 2ª voz da IA e o playback…" : "Juntando a sua voz com o playback…" });
         const out = path.join(SONGS_DIR, `${newId}.mp3`);
-        await ffmpeg(["-i", raw, "-i", inst, "-filter_complex", filter, "-map", "[out]", "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "192k", out]);
+        await ffmpeg(["-i", raw, "-i", inst, ...(harm ? ["-i", harm] : []), "-filter_complex", filter, "-map", "[out]", "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "192k", out]);
         const mine = {
           ...song,
           id: newId,
-          title: `${song.title} (minha voz)`,
+          title: `${song.title} (${duet ? "dueto com a IA" : "minha voz"})`,
           url: `/audio/${newId}.mp3`,
           createdAt: new Date().toISOString(),
           favorite: false,
           parentId: song.id,
           stems: undefined,
-          karaoke: { voice: `/audio/media/${newId}/voz-gravada.${ext}`, reverb: b.reverb || "igreja", enhanced: enhance },
+          karaoke: { voice: `/audio/media/${newId}/voz-gravada.${ext}`, reverb: b.reverb || "igreja", enhanced: enhance, ...(duet ? { duet, key: tone.name } : {}) },
           spec: { ...(song.spec || {}), engine: "Karaokê · sua voz + playback (melhorada pelo ACAIAMUSIC)" },
         };
         await updateSongs((songs) => [mine, ...songs]);

@@ -218,3 +218,35 @@ export function lyricTimeline(order, heard) {
   });
   return lines.map(({ sec, words }) => ({ sec, text: words.map((w) => w[0]).join(" "), t: words[0][1], end: words.at(-1)[2], words }));
 }
+
+// 2ª voz (dueto do karaokê): a voz da IA vira uma terça acima/abaixo, na escala do tom (Modal, só processador)
+export function harmonyUrl() {
+  const s = getSettings();
+  return /acaiamusic-estudio-estudio/.test(s.modalUrl || "") ? s.modalUrl.replace("acaiamusic-estudio-estudio", "acaiamusic-harmonia-harmonia").replace(/\/+$/, "") : "";
+}
+export async function harmonize(audioBuf, { tonic, minor, dir }) {
+  const url = harmonyUrl();
+  if (!url) throw new Error("O dueto precisa do estúdio no Modal.");
+  const key = getSettings().modalKey;
+  const post = async (body) => {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, ...body }), signal: AbortSignal.timeout(90000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.error) throw new Error(j.error || `a 2ª voz respondeu ${r.status}`);
+    return j;
+  };
+  const { call_id } = await post({ audio: Buffer.from(audioBuf).toString("base64"), tonic, minor, dir });
+  if (!call_id) throw new Error("a 2ª voz não começou");
+  const until = Date.now() + 20 * 60 * 1000;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 5000));
+    let j;
+    try {
+      j = await post({ call_id });
+    } catch (e) {
+      if (/não deu certo|Chave/i.test(e.message)) throw e;
+      continue;
+    }
+    if (j.audio) return Buffer.from(j.audio, "base64");
+  }
+  throw new Error("a 2ª voz demorou demais");
+}

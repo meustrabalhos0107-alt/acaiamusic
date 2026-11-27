@@ -1307,3 +1307,16 @@ dialog { max-width: calc(100vw - 16px); }
 .quality .ok { color: #fde68a; }
 .quality .bad { color: #fca5a5; }
 .quality .q-item b { font-weight: 900; }
+
+/* medley */
+.medley-list { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 6px; counter-reset: md; }
+.medley-list li { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 10px; background: #ffffff08; counter-increment: md; }
+.medley-list li::before { content: counter(md); font-weight: 800; color: #f472b6; width: 1.4em; }
+.medley-list li.muted::before { content: ""; }
+.medley-list li span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.medley-list li small { color: #ffffff80; }
+.medley-list li button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #ffffff22; background: transparent; color: inherit; cursor: pointer; }
+.medley-list li button:disabled { opacity: .3; cursor: default; }
+#variant-dialog .share-grid { margin-top: 12px; }
+#medley-dialog .field-row { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; margin-top: 12px; }
+@media (max-width: 520px) { #medley-dialog .field-row { grid-template-columns: 1fr; } }

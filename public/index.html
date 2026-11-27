@@ -429,6 +429,7 @@
         </div>
         <div class="lib-head-tools">
           <input id="search" type="search" placeholder="Buscar por título, momento, estilo…" />
+          <button class="btn ghost sm" id="lib-medley" title="Juntar trechos de 2 a 4 músicas no mesmo tom">🎼 Medley</button>
           <button class="btn ghost sm" id="lib-queue" title="Ver, editar, reordenar e cancelar as músicas sendo criadas">🎵 Fila de criação <em id="lib-queue-n"></em></button>
         </div>
       </header>
@@ -622,6 +623,7 @@
           <button id="dlg-stage" class="btn ghost" title="Tela cheia para tocar ao vivo: letra e cifra rolando no tempo da música, com a batida do teclado">🎤 Modo palco</button>
           <button id="dlg-fav" class="btn ghost">♡ Favoritar</button>
           <a id="dlg-download" class="btn ghost" download>⬇ MP3</a>
+          <button id="dlg-variant" class="btn ghost" title="A mesma música só com violão, só com piano ou ao vivo na igreja (a original continua)">🎸 Outras versões</button>
           <button id="dlg-redo" class="btn ghost" title="Grava de novo do mesmo jeito; o Whisper confere a pronúncia e fica a gravação mais clara">🎯 Refazer</button>
           <button id="dlg-reuse" class="btn ghost">✎ Nova versão</button>
           <button id="dlg-album" class="btn ghost">📀 Álbum</button>
@@ -834,6 +836,12 @@
             <button data-r="estudio">🎙 Estúdio</button>
             <button data-r="seco">Seco</button>
           </div>
+          <p class="sub-label">🎶 Dueto com a IA <small class="muted">a IA canta a 2ª voz junto com a sua, seguindo o tom da música</small></p>
+          <div class="segmented mini-seg" id="kk-duet">
+            <button class="on" data-d="">Só eu</button>
+            <button data-d="up">IA na terça acima</button>
+            <button data-d="down">IA na terça abaixo</button>
+          </div>
           <label class="check"><input type="checkbox" id="kk-enhance" checked /> <span><b>Melhorar minha voz</b> · tira ruído e chiado, equaliza, deixa o volume estável e dá brilho</span></label>
           <div class="pane-actions">
             <button class="btn primary" id="kk-mix">✨ Juntar e melhorar</button>
@@ -947,6 +955,35 @@
       <small class="muted">Eu separo sozinho o que é sobre a <b>melodia</b>, a <b>música</b> (instrumentos, ritmo, estilo) e a <b>letra</b>, e aplico cada parte no lugar certo.</small>
     </div>
     <div class="pane-actions"><button class="btn primary" id="rd-go">🎯 Refazer agora</button></div>
+  </dialog>
+
+  <!-- ============ OUTRAS VERSÕES (violão, piano, ao vivo) ============ -->
+  <dialog id="variant-dialog" class="settings">
+    <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">🎸 Outras versões</span>
+    <h2 id="vr-title">Outra versão</h2>
+    <p class="muted small">Grava de novo com a mesma letra, o mesmo tom e o mesmo jeito de cantar, mas com outro arranjo. Vira uma música nova; a original continua igual.</p>
+    <div class="share-grid">
+      <button class="share-card" data-kind="violao"><span>🎸</span><b>Só violão</b><small>acústica, dedilhada, íntima</small></button>
+      <button class="share-card" data-kind="piano"><span>🎹</span><b>Só piano</b><small>piano e voz, emocionante</small></button>
+      <button class="share-card" data-kind="aovivo"><span>⛪</span><b>Ao vivo na igreja</b><small>banda, ambiente e assembleia</small></button>
+    </div>
+  </dialog>
+
+  <!-- ============ MEDLEY ============ -->
+  <dialog id="medley-dialog" class="settings">
+    <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
+    <span class="eyebrow">🎼 Medley</span>
+    <h2>Juntar músicas</h2>
+    <p class="muted small">De cada música entra o trecho do refrão. Todas ficam no tom da 1ª e passam de uma para outra com uma transição suave. Ótimo para entrada, comunhão longa ou abertura.</p>
+    <ol class="medley-list" id="md-list"></ol>
+    <button class="btn ghost sm" id="md-add">＋ Escolher músicas</button>
+    <div class="field-row">
+      <div class="field"><label for="md-secs">Trecho de cada música</label><select id="md-secs"><option value="30">30 s</option><option value="45" selected>45 s</option><option value="60">1 min</option><option value="90">1 min 30</option></select></div>
+      <div class="field"><label for="md-name">Nome <em class="muted">opcional</em></label><input type="text" id="md-name" maxlength="120" placeholder="Medley de Comunhão" /></div>
+    </div>
+    <div class="stem-progress hidden" id="md-progress"><div class="progress"><div id="md-bar"></div></div><p id="md-msg" class="small"></p></div>
+    <div class="pane-actions"><button class="btn primary" id="md-go">🎼 Criar medley</button></div>
   </dialog>
 
   <!-- ============ EDITAR UM PEDIDO DA FILA ============ -->
@@ -1091,8 +1128,6 @@
       <small id="login-err" class="login-err"></small>
     </form>
   </div>
-  <script type="module">import * as KB from "/keyboard.js"; window.KB = KB; dispatchEvent(new Event("kb-ready"));</script>
-  <script src="/app.js"></script>
   <!-- MODO PALCO -->
   <dialog id="stage" class="stage">
     <header class="st-top">
@@ -1114,5 +1149,7 @@
       <span id="st-time">0:00</span>
     </footer>
   </dialog>
+  <script type="module">import * as KB from "/keyboard.js"; window.KB = KB; dispatchEvent(new Event("kb-ready"));</script>
+  <script src="/app.js"></script>
 </body>
 </html>

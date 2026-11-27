@@ -174,6 +174,8 @@ export function cleanOptions(o = {}) {
     chordProgression: str(o.chordProgression, 80).replace(/[^A-Ga-g0-9#/ mjsuadi°º+()]/g, ""),
     // estilo (batida) do teclado Yamaha PSR-E343 escolhido; 0 = automático
     keyboardStyle: Number(o.keyboardStyle) >= 1 && Number(o.keyboardStyle) <= 136 ? Math.round(Number(o.keyboardStyle)) : 0,
+    // versão especial da mesma música: só violão, só piano ou ao vivo na igreja
+    arrangement: ARRANGEMENTS[o.arrangement] ? o.arrangement : "",
   };
 }
 
@@ -237,8 +239,30 @@ export function buildTags(o, aiStyles = [], extra = []) {
 
 // estilos tradicionais (coral, gregoriano, órgão, polifonia): ficam tradicionais, só com produção limpa
 const TRADITIONAL = /gregorian|chant|choir|choral|satb|polyphon|organ|hymn|cathedral|a cappella|renaissance|baroque/i;
+// Versões especiais (a mesma letra e melodia, outro arranjo). Entram no lugar da produção moderna.
+export const ARRANGEMENTS = {
+  violao: {
+    label: "Só violão",
+    genre: "Acústico (violão)",
+    genreTags: "unplugged acoustic ballad",
+    tags: ["unplugged acoustic version, solo acoustic guitar fingerpicking accompaniment only, no drums, no bass, no synths", "intimate and warm, natural room sound, gentle dynamics, soft and close vocal"],
+  },
+  piano: {
+    label: "Só piano",
+    genre: "Piano e voz",
+    genreTags: "piano ballad",
+    tags: ["solo piano version, only grand piano accompaniment, no drums, no guitar, no synths", "intimate and emotional, soft dynamics, natural room sound, soft and close vocal"],
+  },
+  aovivo: {
+    label: "Ao vivo na igreja",
+    genre: "Ao vivo",
+    genreTags: "live worship performance",
+    tags: ["live performance recording in a church, acoustic band, natural room reverb, warm and organic sound", "congregation softly singing along on the chorus, real live feel, slight ambience"],
+  },
+};
 function modernTags(o) {
   const instrumental = o.voice === "Instrumental";
+  if (ARRANGEMENTS[o.arrangement]) return [...ARRANGEMENTS[o.arrangement].tags, ...(instrumental ? [] : ["natural expressive human voice, no autotune, clear diction"])];
   const traditional = TRADITIONAL.test(String(o.genreTags || ""));
   const t = traditional
     ? ["clean modern recording, clear and balanced mix", "beautiful memorable melody, natural dynamics"]
