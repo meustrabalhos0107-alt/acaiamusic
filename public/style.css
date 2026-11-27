@@ -1377,3 +1377,9 @@ body.help-mode [data-tip] { outline: 1px dashed #f9a8d488; outline-offset: 2px; 
 button, a, .card, .chip { touch-action: manipulation; }
 /* celulares fracos: menos desfoque (o desfoque de fundo pesa muito na GPU) */
 @media (max-width: 640px) { .help-toggle { backdrop-filter: none; } }
+
+/* dentro das janelas, o "?" fica ao lado do X (antes ficava por cima dele) */
+dialog .help-toggle { position: absolute; top: 16px; right: 58px; width: 34px; height: 34px; font-size: 15px; box-shadow: none; }
+dialog .eyebrow { padding-right: 100px; }
+/* no modo palco a barra de cima já tem os botões: o "?" não aparece */
+#stage .help-toggle { display: none; }

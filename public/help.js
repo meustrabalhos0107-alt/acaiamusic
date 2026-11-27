@@ -306,7 +306,7 @@
         longPressed = false;
         return;
       }
-      if (document.body.classList.contains("help-mode") && el && el.id !== "help-toggle") {
+      if (document.body.classList.contains("help-mode") && el && el.id !== "help-toggle" && !el.matches(".close, #st-close, [data-close]")) {
         e.preventDefault();
         e.stopPropagation();
         show(el);
@@ -329,8 +329,8 @@
   btn.addEventListener("click", () => {
     const on = document.body.classList.toggle("help-mode");
     hide();
-    btn.textContent = on ? "✓" : "?";
-    window.toast?.(on ? "❓ Modo ajuda ligado: toque em qualquer botão para saber o que ele faz. Toque no ✓ para desligar." : "Modo ajuda desligado.", false, 4500);
+    btn.setAttribute("aria-pressed", on);
+    window.toast?.(on ? "❓ Modo ajuda ligado: toque em qualquer botão para saber o que ele faz. Toque no ? rosa para desligar." : "Modo ajuda desligado.", false, 4500);
   });
   // os diálogos abertos ficam por cima de tudo: o botão de ajuda vai junto
   new MutationObserver(() => {
