@@ -2020,16 +2020,51 @@ function lyricsText(song, { withTitle = true } = {}) {
   return `${head}${body}${refs}\n\n🎵 Criado no ACAIAMUSIC`;
 }
 const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+// O celular só abre o "Compartilhar" logo depois de um toque. Antes o arquivo era baixado no
+// toque e, quando o servidor demorava, o pedido expirava e caía no "baixar e abrir". Agora o
+// arquivo é preparado antes (ao abrir a aba WhatsApp) e o toque compartilha na hora.
+const shareFiles = new Map(); // url -> { file, promise }
+function prepShareFile(url, filename, mime) {
+  if (!url) return null;
+  let e = shareFiles.get(url);
+  if (!e) {
+    e = {};
+    e.promise = fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.blob();
+      })
+      .then((b) => (e.file = new File([b], filename, { type: mime })))
+      .catch((err) => (shareFiles.delete(url), Promise.reject(err)));
+    shareFiles.set(url, e);
+    if (shareFiles.size > 6) shareFiles.delete(shareFiles.keys().next().value);
+  }
+  return e;
+}
 async function shareFile(url, filename, mime, text) {
-  try {
-    const blob = await (await fetch(url)).blob();
-    const file = new File([blob], filename, { type: mime });
-    if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], text, title: filename });
-      return;
+  const canFiles = navigator.share && navigator.canShare?.({ files: [new File([""], "x.mp3", { type: mime })] });
+  if (canFiles) {
+    // o WhatsApp não põe legenda em áudio: a letra vai copiada para colar na conversa
+    if (text && mime.startsWith("audio")) navigator.clipboard?.writeText(text).catch(() => {});
+    const e = prepShareFile(url, filename, mime);
+    if (e.file) {
+      try {
+        await navigator.share({ files: [e.file], text, title: filename });
+        if (text && mime.startsWith("audio")) toast("📋 A letra também foi copiada: cole na conversa do WhatsApp.", false, 6000);
+        return;
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        if (err.name === "NotAllowedError") return toast("Toque de novo para enviar.", false, 4000);
+      }
+    } else {
+      toast("⏳ Preparando o arquivo para o WhatsApp…", false, 3000);
+      try {
+        await e.promise;
+        return toast("✅ Arquivo pronto: toque de novo para enviar no WhatsApp.", false, 6000);
+      } catch {
+        toast("Não consegui preparar o arquivo agora. Vou baixar para você anexar.", true, 5000);
+      }
     }
-  } catch (e) {
-    if (e.name === "AbortError") return;
   }
   const a = document.createElement("a");
   a.href = url;
@@ -2184,6 +2219,12 @@ function selectTab(t) {
   $$(".tab-pane").forEach((p) => p.classList.toggle("on", p.dataset.p === t));
   if (t === "video") (drawVideoPreview(), dlgSong && !dlgSong.illustration && makeIllustration(dlgSong));
   if (t === "editar" && dlgSong) drawWave(dlgSong);
+  // aba WhatsApp: já prepara os arquivos, para o toque abrir o "Compartilhar" na hora
+  if (t === "share" && dlgSong && navigator.canShare) {
+    prepShareFile(dlgSong.url, `${safeName(dlgSong.title)}.mp3`, "audio/mpeg");
+    if (dlgSong.stems?.instrumental) prepShareFile(dlgSong.stems.instrumental, `${safeName(dlgSong.title)} (playback).mp3`, "audio/mpeg");
+    if (dlgSong.lastVideo) prepShareFile(dlgSong.lastVideo, `${safeName(dlgSong.title)}.mp4`, "video/mp4");
+  }
 }
 $$("#dlg-tabs button").forEach((b) => b.addEventListener("click", () => selectTab(b.dataset.t)));
 $("#song-dialog").addEventListener("close", stopMixer);
@@ -3380,6 +3421,7 @@ $("#btn-video").onclick = async (e) => {
       $("#video-bar").style.width = vPct + "%";
       if (job.status === "done") {
         song.lastVideo = job.url;
+        if (navigator.canShare) prepShareFile(job.url, `${safeName(song.title)}.mp4`, "video/mp4"); // pronto para "Postar no Status"
         if (dlgSong?.id === song.id) {
           const v = $("#video-out");
           v.src = job.url;
