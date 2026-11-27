@@ -548,17 +548,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       await fs.rm(path.join(SONGS_DIR, `${outId}-v2.mp3`), { force: true });
       await fs.rm(studio.mediaDir(outId), { recursive: true, force: true }); // faixas e vídeos da gravação antiga
     }
-    let alt = null;
-    if (altRaw) {
-      set({ status: "saving", message: "Masterizando a 2ª versão…" });
-      try {
-        const a = await masterOrPlain(altRaw);
-        await fs.writeFile(path.join(SONGS_DIR, `${outId}-v2.mp3`), a.mp3);
-        alt = { url: `/audio/${outId}-v2.mp3${old ? `?v=${rev}` : ""}`, duration: Math.round(a.seconds || 0) };
-      } catch (e) {
-        console.log("2ª versão não foi salva:", e.message);
-      }
-    }
+    const alt = null; // a 2ª versão é masterizada depois que a música já está pronta (logo abaixo)
 
     // cifra tirada do áudio, quando o Whisper ouviu a música
     let audioChords = null;
@@ -608,6 +598,18 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
     if (job.attempt !== attempt) throw new Error("SUPERSEDED");
     await updateSongs((songs) => (old && songs.some((x) => x.id === outId) ? songs.map((x) => (x.id === outId ? song : x)) : [song, ...songs]));
     set({ status: "done", message: pron?.score != null ? `Pronta! Pronúncia: ${pron.score}% da letra entendida.` : "Pronta!", song });
+    // 2ª versão (para comparar): masterizada em segundo plano, sem segurar a fila em "Salvando"
+    if (altRaw)
+      (async () => {
+        try {
+          const a = await masterOrPlain(altRaw);
+          await fs.writeFile(path.join(SONGS_DIR, `${outId}-v2.mp3`), a.mp3);
+          const v2 = { url: `/audio/${outId}-v2.mp3${old ? `?v=${rev}` : ""}`, duration: Math.round(a.seconds || 0) };
+          await updateSongs((songs) => songs.map((x) => (x.id === outId && x.url === song.url ? { ...x, alt: v2 } : x)));
+        } catch (e) {
+          console.log("2ª versão não foi salva:", e.message);
+        }
+      })();
     // Capa ilustrada do tema, automática (em segundo plano)
     autoIllustrate(outId);
     // Cifra tirada da própria música: o ouvido (Whisper + acordes) escuta em segundo plano, sem atrasar a fila

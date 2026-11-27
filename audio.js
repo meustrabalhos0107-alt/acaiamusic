@@ -117,10 +117,14 @@ export async function master(buf) {
   const out = path.join(os.tmpdir(), `acaia-master-${id}.mp3`);
   try {
     await fsp.writeFile(src, buf);
-    const log1 = await runFfmpeg(["-i", src, "-af", `${TONE},loudnorm=I=-13:TP=-1:LRA=11:print_format=json`, "-f", "null", "-"]);
-    const m = JSON.parse(log1.slice(log1.lastIndexOf("{"), log1.lastIndexOf("}") + 1));
-    const ln = `loudnorm=I=-13:TP=-1:LRA=11:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
-    const log2 = await runFfmpeg(["-i", src, "-af", `${TONE},${ln}`, "-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "256k", out]);
+    // 1) mede o volume (EBU R128) já com o timbre aplicado. Antes era o loudnorm, que trabalha
+    //    internamente a 192 kHz e levava minutos na CPU fraca do servidor grátis.
+    const log1 = await runFfmpeg(["-i", src, "-af", `aresample=44100,${TONE},ebur128=framelog=quiet`, "-f", "null", "-"]);
+    const I = Number(/I:\s+(-?[\d.]+) LUFS/.exec(log1.slice(log1.lastIndexOf("Summary:")))?.[1]);
+    if (!Number.isFinite(I) || I < -70) throw new Error("não consegui medir o volume");
+    const gain = Math.max(-12, Math.min(18, -13 - I)); // alvo: -13 LUFS (volume de streaming)
+    // 2) ganho fixo + limitador (teto ~ -1 dB), uma passada só
+    const log2 = await runFfmpeg(["-i", src, "-af", `aresample=44100,${TONE},volume=${gain.toFixed(2)}dB,alimiter=limit=0.89:attack=5:release=60:level=false`, "-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "256k", out]);
     const d = /time=(\d+):(\d+):([\d.]+)/g;
     let secs = 0;
     for (const x of log2.matchAll(d)) secs = Number(x[1]) * 3600 + Number(x[2]) * 60 + Number(x[3]);
