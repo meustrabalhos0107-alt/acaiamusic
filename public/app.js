@@ -545,6 +545,90 @@ $("#ref-yt-go").addEventListener("click", async () => {
     btn.textContent = "Usar este vídeo";
   }
 });
+// Referência gravada na hora: a pessoa canta a ideia da melodia (vai como WAV mono, leve)
+const refMic = { rec: null, t0: 0, timer: 0 };
+function wavFromBuffer(buf, rate = 24000) {
+  const ch = buf.getChannelData(0);
+  const n = ch.length, out = new DataView(new ArrayBuffer(44 + n * 2));
+  const w = (o, s) => [...s].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); out.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
+  out.setUint32(24, rate, true); out.setUint32(28, rate * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
+  w(36, "data"); out.setUint32(40, n * 2, true);
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(ch[i]));
+  const g = peak > 0.05 ? 0.9 / peak : 1; // normaliza o volume (voz baixa no celular)
+  for (let i = 0; i < n; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, ch[i] * g)) * 0x7fff, true);
+  return new Blob([out], { type: "audio/wav" });
+}
+async function stopRefMic() {
+  const r = refMic.rec;
+  if (!r || r.state !== "recording") return;
+  r.stop();
+}
+$("#ref-mic").addEventListener("click", async () => {
+  if (refMic.rec?.state === "recording") return stopRefMic();
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast("Este navegador não grava áudio. Use o Chrome ou o Edge atualizados.", true, 7000);
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  } catch {
+    return toast("Permita o uso do microfone para gravar a sua voz.", true, 7000);
+  }
+  audio.pause();
+  const chunks = [];
+  const rec = (refMic.rec = new MediaRecorder(stream));
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec.onstop = async () => {
+    clearInterval(refMic.timer);
+    stream.getTracks().forEach((t) => t.stop());
+    $("#ref-mic").textContent = "🎤 Gravar de novo";
+    $("#ref-mic").classList.remove("rec");
+    $("#ref-mic-time").classList.add("hidden");
+    const secs = (Date.now() - refMic.t0) / 1000;
+    if (secs < 4) return toast("Grave pelo menos uns 10 segundos cantando.", true, 5000);
+    try {
+      // converte para WAV mono 24 kHz (o estúdio aceita qualquer navegador assim)
+      const raw = await new Blob(chunks).arrayBuffer();
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const dec = await ac.decodeAudioData(raw);
+      ac.close();
+      const off = new OfflineAudioContext(1, Math.ceil(dec.duration * 24000), 24000);
+      const src = off.createBufferSource();
+      src.buffer = dec;
+      src.connect(off.destination);
+      src.start();
+      const wav = wavFromBuffer(await off.startRendering());
+      const data = await new Promise((ok) => {
+        const fr = new FileReader();
+        fr.onload = () => ok(fr.result);
+        fr.readAsDataURL(wav);
+      });
+      state.reference = { name: "minha-voz.wav", data, voice: true };
+      $("#ref-label").textContent = `🎤 Minha voz (${fmt(dec.duration)})`;
+      $("#ref-sub").textContent = "Gravada agora · a IA vai se inspirar no seu jeito de cantar e na melodia";
+      $("#ref-drop").classList.add("has");
+      $("#ref-clear").classList.remove("hidden");
+      $("#ref-audio").src = data;
+      $("#ref-audio").classList.remove("hidden");
+      toast("🎤 Sua voz está pronta como referência ✓ Ouça abaixo antes de criar.", false, 4000);
+    } catch (e) {
+      toast("Não consegui usar a gravação: " + e.message, true, 7000);
+    }
+  };
+  rec.start(250);
+  refMic.t0 = Date.now();
+  $("#ref-mic").textContent = "■ Parar e usar";
+  $("#ref-mic").classList.add("rec");
+  $("#ref-mic-time").classList.remove("hidden");
+  const tick = () => {
+    const s = (Date.now() - refMic.t0) / 1000;
+    $("#ref-mic-time").textContent = `● ${fmt(s)} / 0:45`;
+    if (s >= 45) stopRefMic();
+  };
+  tick();
+  refMic.timer = setInterval(tick, 250);
+});
 $("#ref-clear").addEventListener("click", (e) => {
   e.preventDefault();
   state.reference = null;
@@ -1562,10 +1646,10 @@ function redoSong(song) {
   $("#rd-go").onclick = () => ($("#redo-dialog").close(), redoSongNow(song, $("#rd-note").value.trim()));
   $("#redo-dialog").showModal();
 }
-async function redoSongNow(song, note = "") {
+async function redoSongNow(song, note = "", improve = false) {
   let r;
   try {
-    r = await api(`/api/songs/${song.id}/redo`, { method: "POST", body: JSON.stringify({ check: true, note }) });
+    r = await api(`/api/songs/${song.id}/redo`, { method: "POST", body: JSON.stringify({ check: true, note, improve }) });
   } catch (e) {
     return toast(e.message, true);
   }
@@ -2138,6 +2222,7 @@ function openSong(song) {
   $("#dlg-download").download = `${safeName(song.title)}.mp3`;
   $("#dlg-play").onclick = () => play(song);
   resetTranslation(song); // tradução da letra (a original não muda)
+  renderQuality(song); // nota de qualidade + "Melhorar esta"
   renderVersions(song);
   $("#dlg-fav").onclick = () => toggleFav(song);
   $("#dlg-album").onclick = () => albumsForSong(song);
@@ -3429,9 +3514,95 @@ async function makeIllustration(song, novo = false) {
 }
 $("#video-art").onclick = () => dlgSong && makeIllustration(dlgSong, true);
 
+// ---- Estilo "história animada": camada de cima discreta (título pequeno, marca e sombras suaves) ----
+let videoStyle = localStorage.getItem("acaia-video-style") || "historia";
+function syncVideoStyle() {
+  $$("#video-style button").forEach((b) => b.classList.toggle("on", b.dataset.s === videoStyle));
+  $(".video-controls").dataset.style = videoStyle;
+  $("#btn-video").textContent = videoStyle === "historia" ? "🎬 Criar história animada (1 min)" : "🎬 Criar vídeo de 1 minuto";
+}
+$$("#video-style button").forEach((b) =>
+  b.addEventListener("click", () => {
+    videoStyle = b.dataset.s;
+    localStorage.setItem("acaia-video-style", videoStyle);
+    syncVideoStyle();
+    drawVideoPreview();
+  }),
+);
+syncVideoStyle();
+async function drawStoryOverlay(canvas, song, format, preview = false) {
+  const V = format !== "horizontal";
+  const W = V ? 720 : 1280, H = V ? 1280 : 720;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (preview) {
+    // prévia: a imagem do tema ocupa a tela, como a 1ª cena
+    const pic = song.illustration?.url ? await loadImg(song.illustration.url).catch(() => null) : null;
+    const art = pic || (await loadImg("data:image/svg+xml;charset=utf-8," + encodeURIComponent(coverArt(song.cover ?? 1, 'width="800" height="800"'))));
+    const sc = Math.max(W / art.width, H / art.height);
+    ctx.drawImage(art, (W - art.width * sc) / 2, (H - art.height * sc) / 2, art.width * sc, art.height * sc);
+  }
+  // sombras suaves só no alto (título) e embaixo (letra), para o filme aparecer limpo no meio
+  let g = ctx.createLinearGradient(0, 0, 0, H * 0.2);
+  g.addColorStop(0, "rgba(0,0,0,0.5)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H * 0.2);
+  g = ctx.createLinearGradient(0, H * 0.74, 0, H);
+  g.addColorStop(0, "rgba(0,0,0,0)");
+  g.addColorStop(1, "rgba(0,0,0,0.55)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, H * 0.74, W, H * 0.26);
+  // título discreto no alto, à esquerda
+  const o = song.options || {};
+  const pad = V ? 44 : 56;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = "rgba(249,168,212,0.95)";
+  ctx.font = `600 ${V ? 17 : 16}px Segoe UI, Inter, Arial, sans-serif`;
+  const kicker = (o.mode === "catolica" ? [o.moment, o.season] : [song.genre]).filter(Boolean).join(" · ").toUpperCase();
+  ctx.fillText(kicker, pad, pad + 14);
+  ctx.fillStyle = "rgba(255,255,255,0.96)";
+  ctx.font = `700 ${V ? 30 : 28}px Segoe UI, Inter, Arial, sans-serif`;
+  let y = pad + 52;
+  for (const l of wrap(ctx, song.title, W * (V ? 0.7 : 0.5)).slice(0, 2)) {
+    ctx.fillText(l, pad, y);
+    y += V ? 36 : 34;
+  }
+  // marca pequena no canto
+  ctx.textAlign = "right";
+  ctx.font = `800 ${V ? 16 : 15}px Segoe UI, Inter, Arial, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.fillText("ACAIAMUSIC", W - pad, pad + 14);
+  ctx.shadowBlur = 0;
+  if (preview) {
+    // como a letra vai aparecer (pequena, acendendo palavra por palavra)
+    const line = (song.sections || []).find((s) => s.lines.length)?.lines[0] || "";
+    ctx.textAlign = "center";
+    ctx.font = `600 ${V ? 40 : 36}px Poppins, Segoe UI, Inter, Arial, sans-serif`;
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = 6;
+    const ly = H - (V ? H * 0.085 : H * 0.1) - 8;
+    const lines = wrap(ctx, line, W * 0.82).slice(0, 2);
+    lines.forEach((l, i) => {
+      ctx.fillStyle = i === 0 ? "rgba(255,255,255,0.97)" : "rgba(255,255,255,0.55)";
+      ctx.fillText(l, W / 2, ly - (lines.length - 1 - i) * (V ? 50 : 44));
+    });
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(0, H - 6, W, 6);
+    ctx.fillStyle = "#f9a8d4";
+    ctx.fillRect(0, H - 6, W * 0.35, 6);
+  }
+}
+
 async function drawVideoPreview() {
   if (!dlgSong) return;
   const c = $("#video-canvas");
+  $(".video-preview").style.maxWidth = videoFormat === "vertical" ? "260px" : "100%";
+  if (videoStyle === "historia") return drawStoryOverlay(c, dlgSong, videoFormat, true);
   const layout = await drawVideoArt(c, dlgSong, videoFormat);
   // prévia do equalizador
   const ctx = c.getContext("2d");
@@ -3460,6 +3631,17 @@ $("#btn-video").onclick = async (e) => {
   $("#video-msg").textContent = "Desenhando a arte…";
   $("#video-bar").style.width = "5%";
   try {
+    if (videoStyle === "historia") {
+      const oc = document.createElement("canvas");
+      await drawStoryOverlay(oc, song, videoFormat);
+      const png = oc.toDataURL("image/png");
+      const { jobId } = await api(`/api/songs/${song.id}/video`, {
+        method: "POST",
+        body: JSON.stringify({ story: true, novo: $("#story-new").checked, image: png, overlay: png, format: videoFormat, start: Number($("#video-start").value) }),
+      });
+      $("#story-new").checked = false;
+      return await followVideo(song, jobId);
+    }
     const canvas = document.createElement("canvas");
     const layout = await drawVideoArt(canvas, song, videoFormat);
     // clipe animado: manda também a camada de cima (transparente) para ir por cima do clipe
@@ -3473,6 +3655,17 @@ $("#btn-video").onclick = async (e) => {
       method: "POST",
       body: JSON.stringify({ image: canvas.toDataURL("image/png"), overlay, format: videoFormat, start: Number($("#video-start").value), layout }),
     });
+    await followVideo(song, jobId);
+  } catch (err) {
+    toast(err.message, true, 8000);
+  } finally {
+    btn.disabled = false;
+    $("#video-progress").classList.add("hidden");
+  }
+};
+// acompanha a montagem do vídeo até ficar pronto
+async function followVideo(song, jobId) {
+  {
     const t0 = Date.now();
     for (;;) {
       await sleep(1500);
@@ -3493,17 +3686,12 @@ $("#btn-video").onclick = async (e) => {
           $("#dl-video").download = `${safeName(song.title)} (status).mp4`;
           $("#video-actions").classList.remove("hidden");
         }
-        toast("🎬 Vídeo pronto!");
+        toast(/cenas só com movimento/.test(job.message || "") ? `🎬 ${job.message}` : "🎬 Vídeo pronto!", false, 6000);
         break;
       }
     }
-  } catch (err) {
-    toast(err.message, true, 8000);
-  } finally {
-    btn.disabled = false;
-    $("#video-progress").classList.add("hidden");
   }
-};
+}
 const shareVideo = () => {
   if (!dlgSong.lastVideo) {
     selectTab("video");
@@ -4243,3 +4431,207 @@ syncVoice();
   else renderHome();
 })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+// =========================================================
+// MODO PALCO: tela cheia para tocar ao vivo — letra e cifra rolando no tempo da música,
+// a batida do teclado (PSR-E343) em destaque, tom e andamento. Toque num verso para ir até ele.
+// =========================================================
+const stage = { song: null, tl: null, raf: 0, shift: 0, size: Number(localStorage.getItem("acaia-stage-size")) || 1, lock: null, lastK: -2 };
+// "[G]Senhor, tende pie[D]dade" -> acorde de cada palavra (na palavra onde ele entra)
+function chordsPerWord(line) {
+  const out = [];
+  let cur = null, pend = "";
+  for (const tk of String(line).split(/(\[[^\]]+\]|\s+)/).filter(Boolean)) {
+    const m = /^\[([^\]]+)\]$/.exec(tk);
+    if (m) {
+      if (cur) cur.c ||= m[1]; // acorde no meio da palavra: fica nela
+      else pend = m[1];
+      continue;
+    }
+    if (/^\s+$/.test(tk)) {
+      if (cur) out.push(cur);
+      cur = null;
+      continue;
+    }
+    if (!cur) (cur = { w: tk, c: pend }), (pend = "");
+    else cur.w += tk;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+const normLine = (t) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function stageRender() {
+  const s = stage.song, tl = stage.tl;
+  const o = s.options || {};
+  const key = s.chords?.key || (o.key ? o.key.split(" ")[0] + (o.key.includes("minor") ? "m" : "") : "");
+  $("#st-title").textContent = s.title;
+  $("#st-key").textContent = key ? `Tom ${trChord(key, stage.shift)}${stage.shift ? ` (${stage.shift > 0 ? "+" : ""}${stage.shift})` : ""}` : "";
+  const bpm = o.bpm || s.hearing?.tempo;
+  $("#st-bpm").textContent = bpm ? `${bpm} BPM` : "";
+  $("#st-kb").innerHTML = s.keyboard ? `<small>PSR-E343 · STYLE</small><b>${kbPad(s.keyboard.n)}</b><span>${esc(s.keyboard.name)}</span>` : `<small>PSR-E343</small><b>—</b><span>sem batida</span>`;
+  $("#st-sync").textContent = !tl ? "carregando…" : tl.approximate ? "tempo aproximado" : "🎯 sincronizado com a voz";
+  // cifra da música (tirada do áudio ou da IA), verso por verso
+  const chordMap = new Map();
+  for (const sec of s.chords?.sections || []) for (const l of sec.lines) {
+    const words = chordsPerWord(l);
+    chordMap.set(normLine(words.map((x) => x.w).join(" ")), words);
+  }
+  const lines = tl?.lines?.length ? tl.lines : (s.sections || []).flatMap((x) => x.lines.map((text) => ({ sec: x.name, text, t: null, words: text.split(/\s+/).map((w) => [w, null, null, ""]) })));
+  let lastSec = null;
+  $("#st-lyrics").style.setProperty("--st-size", stage.size);
+  $("#st-lyrics").innerHTML = lines.length
+    ? lines
+        .map((l, k) => {
+          const head = l.sec !== lastSec ? `<p class="st-sec">${esc(l.sec)}</p>` : "";
+          lastSec = l.sec;
+          const fromSheet = chordMap.get(normLine(l.text));
+          const words = l.words.map((w, i) => {
+            const c = fromSheet?.[i]?.c ?? (fromSheet ? "" : w[3]);
+            return `<span class="st-w" data-i="${i}">${c ? `<i>${esc(trChord(c, stage.shift))}</i>` : ""}${esc(w[0])}</span>`;
+          });
+          return `${head}<div class="st-line" data-k="${k}">${words.join(" ")}</div>`;
+        })
+        .join("")
+    : `<p class="st-sec">♪ Instrumental ♪</p>`;
+  stage.lines = lines;
+  stage.lastK = -2;
+}
+function stageFollow() {
+  const s = stage.song;
+  if (!s) return;
+  const playing = state.current?.id === s.id;
+  const t = playing ? audio.currentTime : 0;
+  const d = (playing && audio.duration) || s.duration || 1;
+  $("#st-prog").style.width = `${Math.min(100, (t / d) * 100)}%`;
+  $("#st-time").textContent = `${fmt(t)} / ${fmt(d)}`;
+  $("#st-play").textContent = playing && !audio.paused ? "⏸" : "▶";
+  const L = stage.lines || [];
+  let k = -1;
+  if (L.length && L[0].t != null) for (let i = 0; i < L.length; i++) if (L[i].t <= t + 0.25) k = i;
+  const wait = L[0]?.t != null ? L[0].t - t : 0;
+  $("#st-count").textContent = playing && k < 0 && wait > 0 && wait <= 4 ? `entra em ${Math.ceil(wait)}` : "";
+  if (k !== stage.lastK) {
+    $$("#st-lyrics .st-line").forEach((el, i) => {
+      el.classList.toggle("on", i === k);
+      el.classList.toggle("done", i < k);
+    });
+    const el = $(`#st-lyrics .st-line[data-k="${k}"]`);
+    if (el) {
+      const box = $("#st-lyrics");
+      box.scrollTo({ top: el.offsetTop - box.clientHeight * 0.32, behavior: "smooth" });
+    }
+    stage.lastK = k;
+  }
+  // palavra por palavra no verso atual
+  if (k >= 0 && L[k].words[0]?.[1] != null) {
+    $$(`#st-lyrics .st-line[data-k="${k}"] .st-w`).forEach((el, i) => el.classList.toggle("lit", L[k].words[i][1] <= t + 0.1));
+  }
+  stage.raf = requestAnimationFrame(stageFollow);
+}
+async function openStage(song) {
+  stage.song = song;
+  stage.tl = null;
+  stage.shift = typeof transposeBy === "number" ? transposeBy : 0;
+  stageRender();
+  const dlg = $("#stage");
+  if (!dlg.open) dlg.showModal();
+  try {
+    stage.lock = await navigator.wakeLock?.request("screen"); // a tela não apaga no meio da música
+  } catch {}
+  if (state.current?.id !== song.id) play(song);
+  cancelAnimationFrame(stage.raf);
+  stage.raf = requestAnimationFrame(stageFollow);
+  // 1º o que já existe (rápido); se ainda não foi ouvida, ouve agora e sincroniza (uns 30 s)
+  try {
+    stage.tl = await api(`/api/songs/${song.id}/timeline?listen=0`);
+    if (stage.song?.id !== song.id) return;
+    stageRender();
+    if (stage.tl.approximate && !song.hearing && song.voice !== "Instrumental") {
+      $("#st-sync").textContent = "sincronizando com a voz…";
+      const tl = await api(`/api/songs/${song.id}/timeline`);
+      if (stage.song?.id !== song.id) return;
+      stage.tl = tl;
+      stageRender();
+    }
+  } catch (e) {
+    $("#st-sync").textContent = "tempo aproximado";
+  }
+}
+function closeStage() {
+  cancelAnimationFrame(stage.raf);
+  stage.song = null;
+  stage.lock?.release?.().catch(() => {});
+  stage.lock = null;
+  if ($("#stage").open) $("#stage").close();
+}
+$("#stage").addEventListener("close", () => stage.song && closeStage());
+$("#st-close").onclick = closeStage;
+$("#st-play").onclick = () => {
+  if (state.current?.id !== stage.song?.id) return play(stage.song);
+  audio.paused ? audio.play() : audio.pause();
+};
+$("#st-up").onclick = () => ((stage.shift = stage.shift + 1 > 6 ? stage.shift - 11 : stage.shift + 1), stageRender());
+$("#st-down").onclick = () => ((stage.shift = stage.shift - 1 < -6 ? stage.shift + 11 : stage.shift - 1), stageRender());
+$("#st-bigger").onclick = () => ((stage.size = Math.min(2, +(stage.size + 0.15).toFixed(2))), localStorage.setItem("acaia-stage-size", stage.size), stageRender());
+$("#st-smaller").onclick = () => ((stage.size = Math.max(0.6, +(stage.size - 0.15).toFixed(2))), localStorage.setItem("acaia-stage-size", stage.size), stageRender());
+// tocar num verso: a música vai para ele
+$("#st-lyrics").addEventListener("click", (e) => {
+  const el = e.target.closest(".st-line");
+  const l = el && stage.lines?.[Number(el.dataset.k)];
+  if (!l || l.t == null || state.current?.id !== stage.song?.id) return;
+  audio.currentTime = Math.max(0, l.t - 1);
+  if (audio.paused) audio.play();
+});
+$("#dlg-stage").onclick = () => dlgSong && openStage(dlgSong);
+
+// =========================================================
+// NOTA DE QUALIDADE: pronúncia (o que o Whisper entendeu), se a letra coube no tempo sem
+// atropelar, volume de streaming e qualidade da gravação. "Melhorar esta" refaz só o que ficou fraco.
+// =========================================================
+const sylOf = (t) => (String(t).toLowerCase().match(/[aeiouáéíóúâêôãõàüy]+/g) || []).length;
+function songQuality(song) {
+  if (!song.options || song.voice === "Instrumental") return null;
+  const sp = song.spec || {};
+  const secs = (song.sections || []).filter((s) => s.lines.length);
+  if (!secs.length) return null;
+  // sílabas cantadas: o refrão volta depois de cada estrofe (como o estúdio canta)
+  const isCh = (n) => /refr|chorus|resposta/i.test(n);
+  const ch = secs.filter((s) => isCh(s.name)), vs = secs.filter((s) => !isCh(s.name));
+  let syl = secs.reduce((a, s) => a + sylOf(s.lines.join(" ")), 0);
+  if (ch.length === 1 && vs.length >= 2) syl += sylOf(ch[0].lines.join(" ")) * vs.length;
+  const sungTime = Math.max(20, (song.duration || 60) - 22);
+  const rate = syl / sungTime; // sílabas por segundo
+  const items = [];
+  if (sp.pronunciation != null) {
+    const p = sp.pronunciation;
+    items.push({ k: "pron", label: "Pronúncia", value: `${p}% entendida`, score: p >= 92 ? 10 : p >= 85 ? 8 : p >= 75 ? 6 : 4, w: 3 });
+  } else items.push({ k: "pron", label: "Pronúncia", value: "ainda não conferida", score: null, w: 0 });
+  items.push({ k: "fit", label: "Letra no tempo", value: rate <= 2.6 ? "folgada" : rate <= 3.1 ? "justa" : "apertada (atropela)", score: rate <= 2.6 ? 10 : rate <= 3.1 ? 7.5 : 4.5, w: 2 });
+  items.push({ k: "vol", label: "Volume de streaming", value: sp.mastered ? "masterizada" : "sem masterizar", score: sp.mastered ? 10 : 6, w: 1 });
+  items.push({ k: "rec", label: "Gravação", value: sp.quality === "high" ? "qualidade alta" : "rápida", score: sp.quality === "high" ? 10 : 8, w: 1 });
+  const scored = items.filter((i) => i.score != null && i.w);
+  const note = scored.reduce((a, i) => a + i.score * i.w, 0) / scored.reduce((a, i) => a + i.w, 0);
+  return { note: Math.round(note * 10) / 10, items, rate };
+}
+function renderQuality(song) {
+  const box = $("#dlg-quality");
+  const q = songQuality(song);
+  box.classList.toggle("hidden", !q);
+  if (!q) return;
+  const icon = (s) => (s == null ? "…" : s >= 9 ? "✓" : s >= 7 ? "~" : "!");
+  const weak = q.items.filter((i) => i.score != null && i.score < 9);
+  box.innerHTML =
+    `<span class="q-note ${q.note >= 9 ? "good" : q.note >= 7 ? "ok" : "bad"}" title="Nota de qualidade (0 a 10)">⭐ ${q.note.toFixed(1)}</span>` +
+    q.items.map((i) => `<span class="q-item ${i.score == null ? "" : i.score >= 9 ? "good" : i.score >= 7 ? "ok" : "bad"}"><b>${icon(i.score)}</b> ${esc(i.label)}: ${esc(i.value)}</span>`).join("") +
+    (weak.length ? `<button class="btn ghost sm" id="q-improve">✨ Melhorar esta</button>` : "");
+  const btn = $("#q-improve");
+  if (btn)
+    btn.onclick = () => {
+      const fixes = [];
+      if (weak.some((i) => i.k === "fit")) fixes.push("Deixe a letra mais curta, com versos menores e menos palavras, para caber no tempo sem atropelar (mantenha a ideia, o refrão e o sentido).");
+      if (weak.some((i) => i.k === "pron")) fixes.push("Voz bem clara, dicção precisa, cada palavra pronunciada por inteiro, sem engolir sílabas, canto calmo.");
+      const what = weak.map((i) => i.label.toLowerCase()).join(", ");
+      if (!confirm(`Refazer “${song.title}” para melhorar: ${what}?\n\nGrava de novo em qualidade alta, com a revisão de pronúncia (o Whisper ouve e fica com a gravação mais clara).${fixes.length && weak.some((i) => i.k === "fit") ? "\n\nA letra vai ficar um pouco mais curta para caber no tempo." : ""}`)) return;
+      redoSongNow(song, fixes.join(" "), true);
+    };
+}

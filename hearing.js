@@ -149,7 +149,7 @@ export function clipUrl() {
   const s = getSettings();
   return /acaiamusic-estudio-estudio/.test(s.modalUrl || "") ? s.modalUrl.replace("acaiamusic-estudio-estudio", "acaiamusic-clipe-clipe").replace(/\/+$/, "") : "";
 }
-export async function animateCover(imageBuf, prompt, format = "vertical") {
+export async function animateCover(imageBuf, prompt, format = "vertical", extra = {}) {
   const url = clipUrl();
   if (!url) throw new Error("O clipe animado precisa do estúdio no Modal.");
   const key = getSettings().modalKey;
@@ -160,7 +160,7 @@ export async function animateCover(imageBuf, prompt, format = "vertical") {
     return j;
   };
   // começa o clipe e acompanha até ficar pronto (até 25 min, contando a GPU ligar)
-  const { call_id } = await post({ image: imageBuf.toString("base64"), prompt, format, seed: Math.floor(Math.random() * 2 ** 31) });
+  const { call_id } = await post({ image: imageBuf.toString("base64"), prompt, format, seed: Math.floor(Math.random() * 2 ** 31), ...extra });
   if (!call_id) throw new Error("o gerador de clipes não começou");
   const until = Date.now() + 25 * 60 * 1000;
   while (Date.now() < until) {
@@ -175,4 +175,46 @@ export async function animateCover(imageBuf, prompt, format = "vertical") {
     if (j.video) return Buffer.from(j.video, "base64");
   }
   throw new Error("o clipe demorou demais");
+}
+
+// Linha do tempo da letra (na ordem cantada): quando cada verso e cada palavra são cantados,
+// pelo que o Whisper ouviu. Serve para o modo palco e para a letra animada do vídeo.
+// order: seções na ordem cantada; heard: { words: [[palavra, início, fim]], chords }
+export function lyricTimeline(order, heard) {
+  const lyr = [];
+  order.forEach((sec, si) => sec.lines.forEach((line, li) => line.split(/\s+/).filter(Boolean).forEach((word) => lyr.push({ si, li, word }))));
+  const hw = (heard?.words || []).map((w) => ({ n: norm(w[0]), t: Number(w[1]) || 0, e: Number(w[2]) || Number(w[1]) || 0 }));
+  if (!lyr.length || !hw.length) return null;
+  const t0 = new Array(lyr.length).fill(null), t1 = new Array(lyr.length).fill(null);
+  for (const [i, j] of lcsPairs(lyr.map((x) => norm(x.word)), hw.map((x) => x.n))) (t0[i] = hw[j].t), (t1[i] = hw[j].e);
+  const known = t0.map((t, i) => (t == null ? -1 : i)).filter((i) => i >= 0);
+  if (known.length < Math.max(3, lyr.length * 0.25)) return null; // ouviu pouco: não dá para confiar
+  for (let i = 0; i < t0.length; i++) {
+    if (t0[i] != null) continue;
+    const prev = [...known].reverse().find((k) => k < i), next = known.find((k) => k > i);
+    if (prev == null) t0[i] = t0[next] - (next - i) * 0.4;
+    else if (next == null) t0[i] = t1[prev] + (i - prev - 1) * 0.4;
+    else t0[i] = t1[prev] + ((t0[next] - t1[prev]) * (i - prev)) / (next - prev + 1);
+  }
+  for (let i = 0; i < t0.length; i++) if (i && t0[i] < t0[i - 1]) t0[i] = t0[i - 1] + 0.05; // sempre em ordem
+  for (let i = 0; i < t1.length; i++) if (t1[i] == null || t1[i] <= t0[i]) t1[i] = Math.min(t0[i] + 0.45, t0[i + 1] ?? t0[i] + 0.45);
+  const segs = (heard.chords || []).filter((c) => c[2] !== "N");
+  const chordAt = (t) => {
+    let cur = "";
+    for (const [s, , name] of segs) if (s <= t + 0.15) cur = name;
+    else break;
+    return cur;
+  };
+  const lines = [];
+  let cur = null, lastChord = "";
+  lyr.forEach((x, i) => {
+    if (!cur || cur.si !== x.si || cur.li !== x.li) {
+      lines.push((cur = { si: x.si, li: x.li, sec: order[x.si].name, words: [] }));
+      lastChord = "";
+    }
+    const c = chordAt(t0[i]);
+    cur.words.push([x.word, Math.round(Math.max(0, t0[i]) * 100) / 100, Math.round(t1[i] * 100) / 100, c && c !== lastChord ? c : ""]);
+    if (c) lastChord = c;
+  });
+  return lines.map(({ sec, words }) => ({ sec, text: words.map((w) => w[0]).join(" "), t: words[0][1], end: words.at(-1)[2], words }));
 }

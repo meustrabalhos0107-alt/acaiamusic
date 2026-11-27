@@ -1253,3 +1253,57 @@ dialog { max-width: calc(100vw - 16px); }
 .tr-box h4 { margin: 0 0 8px; }
 .tr-box { padding: 12px; border-radius: 14px; border: 1px solid rgba(244, 114, 182, 0.35); background: rgba(244, 114, 182, 0.05); }
 .tr-box .pane-actions { flex-wrap: wrap; }
+
+/* estilo do vídeo: mostra só as opções do estilo escolhido */
+.video-controls[data-style="historia"] .vs-classico, .video-controls[data-style="classico"] .vs-historia { display: none; }
+
+/* ===== Modo palco ===== */
+.stage { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #07070b; color: #fff; display: none; flex-direction: column; }
+.stage[open] { display: flex; }
+.stage::backdrop { background: #000; }
+.st-top { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: #0f0f16; border-bottom: 1px solid #ffffff14; }
+.st-kb { display: grid; grid-template-columns: auto auto; align-items: baseline; column-gap: 8px; padding: 6px 12px; border-radius: 10px; background: #1a2a12; color: #c6f36b; font-family: Consolas, ui-monospace, monospace; box-shadow: inset 0 0 0 1px #c6f36b33; }
+.st-kb small { grid-column: 1 / 3; font-size: 10px; letter-spacing: .08em; opacity: .75; }
+.st-kb b { font-size: 34px; line-height: 1; }
+.st-kb span { font-size: 14px; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.st-info b { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-info > span { font-size: 13px; color: #f9a8d4; }
+.st-info em { color: #ffffff80; font-style: normal; }
+.st-tools { display: flex; gap: 6px; }
+.st-tools button { min-width: 42px; height: 40px; border-radius: 10px; border: 1px solid #ffffff22; background: #ffffff0d; color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
+.st-count { position: absolute; top: 76px; left: 0; right: 0; text-align: center; font-size: 22px; color: #f9a8d4; pointer-events: none; }
+.st-lyrics { --st-size: 1; flex: 1; overflow-y: auto; padding: 30vh 6vw 50vh; scroll-behavior: smooth; font-size: calc(clamp(24px, 4.2vw, 46px) * var(--st-size)); line-height: 1.25; }
+.st-sec { margin: 1.4em 0 .3em; font-size: .42em; letter-spacing: .12em; text-transform: uppercase; color: #ffffff55; }
+.st-line { margin: 0 0 .55em; padding-top: .9em; color: #ffffff59; font-weight: 600; transition: color .25s, transform .25s; cursor: pointer; transform-origin: left center; }
+.st-line.done { color: #ffffff38; }
+.st-line.on { color: #ffffffb3; transform: scale(1.04); }
+.st-w { position: relative; display: inline-block; }
+.st-w i { position: absolute; left: 0; bottom: 100%; font-style: normal; font-weight: 800; font-size: .62em; color: #c6f36b; white-space: nowrap; }
+.st-line.on .st-w.lit { color: #fff; }
+.st-bottom { display: flex; align-items: center; gap: 14px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #0f0f16; border-top: 1px solid #ffffff14; }
+.st-play { width: 54px; height: 54px; border-radius: 50%; border: 0; background: linear-gradient(135deg, #c084fc, #f472b6); color: #fff; font-size: 22px; cursor: pointer; }
+.st-progress { flex: 1; height: 6px; border-radius: 3px; background: #ffffff1f; overflow: hidden; }
+.st-progress div { height: 100%; width: 0; background: #f472b6; }
+#st-time { font-family: Consolas, ui-monospace, monospace; font-size: 13px; color: #ffffffa0; }
+@media (max-width: 640px) {
+  .st-top { flex-wrap: wrap; gap: 8px; }
+  .st-info { order: 3; flex-basis: 100%; }
+  .st-kb b { font-size: 26px; }
+  .st-tools { margin-left: auto; }
+  .st-tools button { min-width: 36px; height: 36px; }
+}
+
+/* gravar a própria voz como referência */
+#ref-mic.rec { background: #ef4444; color: #fff; border-color: #ef4444; animation: pulse-rec 1.2s infinite; }
+.ref-mic-time { font-family: Consolas, ui-monospace, monospace; color: #ef4444; font-size: 13px; align-self: center; }
+@keyframes pulse-rec { 50% { opacity: .7; } }
+
+/* nota de qualidade da música */
+.quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 2px; font-size: 12.5px; }
+.quality .q-note { font-weight: 800; padding: 3px 10px; border-radius: 999px; background: #ffffff10; }
+.quality .q-item { padding: 3px 9px; border-radius: 999px; background: #ffffff08; color: #ffffffb0; }
+.quality .good { color: #86efac; }
+.quality .ok { color: #fde68a; }
+.quality .bad { color: #fca5a5; }
+.quality .q-item b { font-weight: 900; }

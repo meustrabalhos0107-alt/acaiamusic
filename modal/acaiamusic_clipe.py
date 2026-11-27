@@ -49,7 +49,7 @@ def _ltx():
     memory=32768,
     secrets=[modal.Secret.from_name("acaiamusic")],
     scaledown_window=60,
-    max_containers=1,
+    max_containers=3,  # as cenas da "história animada" saem ao mesmo tempo
     timeout=25 * 60,
 )
 def gerar(item: dict):
@@ -90,6 +90,13 @@ def gerar(item: dict):
         f"Scene: {scene}. Peaceful, sacred atmosphere, high detail."
     )
     neg = "worst quality, static, still image, frozen, no motion, inconsistent motion, blurry, jittery, distorted, deformed, morphing, text, letters, watermark, people appearing"
+    if item.get("story"):
+        # cena da "história animada": o movimento vem do roteiro (câmera e ação da cena)
+        prompt = (
+            f"{scene} Smooth professional cinematic camera movement, fluid natural motion of the characters and the environment, "
+            "consistent lighting, modern animated film quality, high detail."
+        )
+        neg = "worst quality, static, still image, frozen, no motion, jittery, flickering, blurry, distorted face, deformed hands, extra limbs, morphing, text, letters, subtitles, watermark"
     frames = int(item.get("frames", 97))
     frames = max(49, min(161, frames - (frames - 1) % 8))  # o modelo pede 8*k+1 quadros
     g = torch.Generator("cuda").manual_seed(int(item.get("seed", 0)) or 42)
@@ -100,7 +107,7 @@ def gerar(item: dict):
         num_inference_steps=int(item.get("steps", 25)), guidance_scale=3.5, decode_timestep=0.03, decode_noise_scale=0.025, generator=g,
     ).frames[0]
     # vai e volta: repete sem emenda visível quando o vídeo de status é mais longo que o clipe
-    loop = list(out) + list(out)[-2:0:-1]
+    loop = list(out) if item.get("story") else list(out) + list(out)[-2:0:-1]  # na história a ação só vai para a frente
     with tempfile.NamedTemporaryFile(suffix=".mp4") as f:
         export_to_video(loop, f.name, fps=24)
         data = open(f.name, "rb").read()

@@ -664,3 +664,41 @@ ${current}`;
   if (out.sections.length !== plan.sections.length) out.sections = out.sections.slice(0, plan.sections.length);
   return { title: out.title, sections: out.sections };
 }
+
+// ---------- Roteiro do vídeo "história animada": uma cena por trecho da letra ----------
+// Mesmo estilo visual e os mesmos personagens em todas as cenas (para parecer um filme só).
+// Cada cena: o que aparece (prompt da imagem) e o movimento (câmera e ação) para a animação.
+export async function storyboard({ title, scenes, mode, moment, season, genre, moods = [] }) {
+  const pal = mode === "catolica" ? liturgicalPalette(season, moment) : null;
+  const system = `Você é diretor de um videoclipe animado moderno e profissional. A letra é dividida em ${scenes.length} trechos, na ordem: crie UMA cena para cada trecho, que conte VISUALMENTE o que a letra diz (uma pequena história com começo, meio e fim, não ilustrações soltas).
+Regras:
+- Tudo EM INGLÊS.
+- "style": UM estilo visual moderno para o filme inteiro (ex.: "stylized 3D animated film, soft volumetric light, cinematic color grading, shallow depth of field"), repetido em todas as cenas.
+- "cast": descrição curta e fixa do(s) personagem(ns), se houver (roupa, cores, idade), para aparecerem iguais em todas as cenas. Pessoas sempre de costas, em silhueta, contra a luz ou em plano médio/aberto — nunca rosto em close.
+- Cada cena: "image" = o que se vê (cenário, personagem, ação congelada, luz, enquadramento; máx. 45 palavras) e "motion" = o movimento em 1 frase (câmera: slow dolly in, orbit, crane up, tracking shot…; e a ação: caminha, ergue as mãos, a luz se abre…).
+- Varie os enquadramentos (aberto, médio, detalhe de mãos/objetos) como num clipe de verdade.${mode === "catolica" ? "\n- Tema católico: símbolos cristãos respeitosos (cruz, altar, luz, pomba, cálice, natureza), coerentes com o momento da Missa." : ""}${pal ? `\n- Paleta de cores da cor litúrgica: ${pal.pt}.` : ""}
+- Sem texto, letras ou palavras na imagem.
+Responda SOMENTE com JSON: {"style":"...","cast":"...","scenes":[{"image":"...","motion":"..."}]}`;
+  const user = `Título: ${title}
+${mode === "catolica" ? `Momento: ${moment || "—"} · Tempo litúrgico: ${season || "—"}\n` : ""}Estilo musical: ${genre || "—"} · Clima: ${moods.join(", ") || "—"}
+Trechos da letra:
+${scenes.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
+  let raw = null;
+  try {
+    raw = await Promise.race([callLLM(system, user), new Promise((_, rej) => setTimeout(() => rej(new Error("demorou")), 40000))]);
+  } catch (e) {
+    console.log("Roteiro do vídeo: a IA de texto falhou, usando cenas simples:", e.message);
+  }
+  const style = String(raw?.style || "stylized 3D animated film, soft volumetric light, cinematic color grading, shallow depth of field").slice(0, 200);
+  const cast = String(raw?.cast || "").slice(0, 200);
+  const list = Array.isArray(raw?.scenes) ? raw.scenes : [];
+  return scenes.map((text, i) => {
+    const s = list[i] || {};
+    const image = String(s.image || `a cinematic scene that shows: ${text}`).replace(/\s+/g, " ").slice(0, 400);
+    const motion = String(s.motion || "slow cinematic dolly in, gentle natural movement").slice(0, 200);
+    return {
+      image: `${image}. ${cast ? `Characters: ${cast}. ` : ""}${style}${pal ? `, ${pal.en}` : ""}, high detail, no text`,
+      motion: `${motion}. ${image}`.slice(0, 560),
+    };
+  });
+}

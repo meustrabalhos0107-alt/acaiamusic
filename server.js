@@ -9,7 +9,7 @@ import { Client, handle_file } from "@gradio/client";
 import { LANG_NAMES, SUNG_LANGS, translateLyrics } from "./lyrics.js";
 import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, ideaMusicTags, illustrationPrompt, refineLyrics, sanitizeChords, splitIdea, writeLyrics } from "./lyrics.js";
 import { masterOrPlain } from "./audio.js";
-import { chordSheetFromAudio, hearingUrl, illustrate, lyricScore, listen } from "./hearing.js";
+import { chordSheetFromAudio, hearingUrl, illustrate, lyricScore, listen, lyricTimeline } from "./hearing.js";
 import { createRegistro, registroPage } from "./registro.js";
 import { createHash } from "node:crypto";
 import { registerStudio } from "./studio.js";
@@ -295,6 +295,44 @@ function toAceLyrics(sections) {
   return sections.every((s) => !s.lines.length) ? "[instrumental]" : text;
 }
 
+// Linha do tempo da letra de uma música (modo palco, letra animada do vídeo).
+// Com o que o Whisper ouviu: o tempo real de cada palavra. Se a música ainda não foi ouvida,
+// ouve agora (uns 30 s) e guarda. Sem o ouvido: tempo aproximado, pela duração e pelo tamanho dos versos.
+async function songTimeline(song, { listenNow = true } = {}) {
+  const order = sungOrder(song.sections || []).filter((s) => s.lines.length);
+  if (!order.length || song.voice === "Instrumental") return { lines: [], approximate: true };
+  let heard = song.hearing;
+  if (!heard?.words?.length && listenNow && hearingUrl()) {
+    try {
+      const mp3 = await fs.readFile(path.join(SONGS_DIR, `${song.id}.mp3`));
+      const h = await listen(mp3, song.spec?.language || "pt");
+      heard = { words: h.words, chords: h.chords, key: h.key, tempo: h.tempo };
+      await updateSongs((songs) => songs.map((x) => (x.id === song.id ? { ...x, hearing: heard } : x)));
+    } catch (e) {
+      console.log("Linha do tempo: o ouvido não conseguiu ouvir agora:", e.message);
+    }
+  }
+  const real = heard?.words?.length ? lyricTimeline(order, heard) : null;
+  if (real) return { lines: real, approximate: false };
+  // aproximado: introdução, versos proporcionais ao número de sílabas, final
+  const d = Number(song.duration) || 120;
+  const intro = Math.min(15, d * 0.1), outro = Math.min(10, d * 0.06);
+  const flat = order.flatMap((s) => s.lines.map((text) => ({ sec: s.name, text })));
+  const w = flat.map((l) => Math.max(3, sylCount(l.text)));
+  const total = w.reduce((a, b) => a + b, 0), span = Math.max(10, d - intro - outro);
+  let acc = 0;
+  return {
+    approximate: true,
+    lines: flat.map((l, k) => {
+      const t = intro + (acc / total) * span;
+      acc += w[k];
+      const end = intro + (acc / total) * span - 0.3;
+      const ws = l.text.split(/\s+/).filter(Boolean);
+      return { ...l, t: +t.toFixed(2), end: +end.toFixed(2), words: ws.map((x, i) => [x, +(t + ((end - t) * i) / ws.length).toFixed(2), +(t + ((end - t) * (i + 1)) / ws.length).toFixed(2), ""]) };
+    }),
+  };
+}
+
 let aceClient = null;
 async function getAce() {
   if (!aceClient) {
@@ -333,7 +371,17 @@ function friendlyAceError(msg = "") {
 // ---------- Fila de trabalhos ----------
 const jobs = new Map(); // id -> { status, message, queue, song, error }
 let chain = Promise.resolve(); // uma geração por vez
-const studio = registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, HF_TOKEN });
+const studio = registerStudio(app, { loadSongs, updateSongs, SONGS_DIR, jobs, HF_TOKEN, songTimeline });
+// tempo de cada verso e palavra (modo palco)
+app.get("/api/songs/:id/timeline", async (req, res) => {
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  try {
+    res.json(await songTimeline(song, { listenNow: req.query.listen !== "0" }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Acompanha a fila do Space e devolve a primeira resposta com dados
 async function follow(sub, set) {
@@ -1190,7 +1238,8 @@ app.post("/api/songs/:id/redo", async (req, res) => {
     duration: Number(song.spec?.requestedDuration) || song.duration || 120,
     language: song.spec?.language || "pt",
     meta: { cover: song.cover },
-    options: cleanOptions(song.options), // normaliza opções de músicas antigas
+    // "Melhorar esta" (nota de qualidade): grava em qualidade alta
+    options: { ...cleanOptions(song.options), ...(req.body?.improve ? { quality: "high" } : {}) }, // normaliza opções de músicas antigas
     reference: null,
     spec: { idea: song.spec?.idea, ideaParts: song.spec?.ideaParts, lyricsSource: song.spec?.lyricsSource, note },
     check,

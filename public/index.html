@@ -254,6 +254,14 @@
               </div>
               <small class="muted">A IA se inspira no estilo, no clima e na sonoridade do trecho (não copia a música). Use vídeos que você tem direito de usar.</small>
             </div>
+            <div class="ref-yt ref-mic">
+              <span class="ref-yt-or">ou grave a sua voz</span>
+              <div class="ref-yt-row">
+                <button type="button" class="btn ghost sm" id="ref-mic">🎤 Gravar minha voz</button>
+                <span class="ref-mic-time hidden" id="ref-mic-time">● 0:00 / 0:45</span>
+              </div>
+              <small class="muted">Cante a melodia que você imaginou (pode ser só "lá-lá-lá") ou um trecho, de 10 a 45 segundos, num lugar silencioso. A IA se inspira no seu jeito de cantar, no timbre e no desenho da melodia.</small>
+            </div>
             <audio id="ref-audio" class="hidden" controls></audio>
           </section>
 
@@ -608,8 +616,10 @@
         <span class="eyebrow" id="dlg-date"></span>
         <h2 id="dlg-title" contenteditable="plaintext-only" spellcheck="false" title="Clique para renomear"></h2>
         <div id="dlg-tags" class="tags"></div>
+        <div id="dlg-quality" class="quality hidden"></div>
         <div class="dlg-actions">
           <button id="dlg-play" class="btn primary">▶ Tocar</button>
+          <button id="dlg-stage" class="btn ghost" title="Tela cheia para tocar ao vivo: letra e cifra rolando no tempo da música, com a batida do teclado">🎤 Modo palco</button>
           <button id="dlg-fav" class="btn ghost">♡ Favoritar</button>
           <a id="dlg-download" class="btn ghost" download>⬇ MP3</a>
           <button id="dlg-redo" class="btn ghost" title="Grava de novo do mesmo jeito; o Whisper confere a pronúncia e fica a gravação mais clara">🎯 Refazer</button>
@@ -704,6 +714,7 @@
       <div class="pane-actions hidden" id="chord-actions">
         <button class="btn ghost sm" id="copy-chords">⧉ Copiar cifra</button>
         <button class="btn ghost sm" id="print-chords">🖨 Imprimir / PDF</button>
+        <button class="btn ghost sm" onclick="document.getElementById('dlg-stage').click()">🎤 Modo palco</button>
         <button class="btn wa-btn sm" id="wa-chords">Enviar cifra no WhatsApp</button>
       </div>
     </div>
@@ -851,6 +862,11 @@
           <video id="video-out" class="hidden" controls playsinline></video>
         </div>
         <div class="video-controls">
+          <p class="sub-label">Estilo do vídeo</p>
+          <div class="segmented" id="video-style">
+            <button class="on" data-s="historia"><b>🎬 História animada</b><small>a letra vira um pequeno filme</small></button>
+            <button data-s="classico"><b>🖼️ Capa + equalizador</b><small>título, refrão e ondas</small></button>
+          </div>
           <p class="sub-label">Formato</p>
           <div class="segmented" id="video-format">
             <button class="on" data-v="vertical"><b>▯ Vertical 9:16</b><small>Status, Stories, Reels</small></button>
@@ -859,10 +875,12 @@
           <p class="sub-label">Trecho de 1 minuto <small class="sum" id="video-range"></small></p>
           <input type="range" id="video-start" min="0" max="0" step="1" value="0" />
           <button class="btn ghost sm" id="video-listen">▶ Ouvir início do trecho</button>
-          <p class="sub-label">Capa ilustrada <small class="sum" id="video-art-msg"></small></p>
-          <button class="btn ghost sm" id="video-art">🎨 Criar outra imagem</button>
-          <label class="video-clip-opt"><input type="checkbox" id="video-clip" checked /> <span><b>🎞️ Clipe animado (IA)</b><small>A imagem do tema ganha vida: vento, nuvens, luz e água em movimento, ocupando a tela toda. Leva de 1 a 2 min na 1ª vez de cada música; depois fica guardado para os próximos vídeos dela.</small></span></label>
-          <p class="muted small">O vídeo leva a capa com uma imagem do tema da música, o título, o refrão, um equalizador animado e a marca d'água <b>ACAIAMUSIC</b>.</p>
+          <p class="muted small vs-historia" id="story-note">A IA lê a letra do trecho e cria um roteiro: cada verso vira uma cena animada (câmera em movimento, personagens e luz), com o mesmo estilo do começo ao fim. A letra aparece pequena embaixo, acendendo palavra por palavra no tempo do canto. Leva de 3 a 5 min na 1ª vez; as cenas ficam guardadas para os próximos vídeos do mesmo trecho.</p>
+          <label class="video-clip-opt vs-historia"><input type="checkbox" id="story-new" /> <span><b>🔄 Criar cenas novas</b><small>Faz outro roteiro e outras cenas para este trecho (em vez de reaproveitar as já criadas).</small></span></label>
+          <p class="sub-label vs-classico">Capa ilustrada <small class="sum" id="video-art-msg"></small></p>
+          <button class="btn ghost sm vs-classico" id="video-art">🎨 Criar outra imagem</button>
+          <label class="video-clip-opt vs-classico"><input type="checkbox" id="video-clip" checked /> <span><b>🎞️ Clipe animado (IA)</b><small>A imagem do tema ganha vida: vento, nuvens, luz e água em movimento, ocupando a tela toda. Leva de 1 a 2 min na 1ª vez de cada música; depois fica guardado para os próximos vídeos dela.</small></span></label>
+          <p class="muted small vs-classico">O vídeo leva a capa com uma imagem do tema da música, o título, o refrão, um equalizador animado e a marca d'água <b>ACAIAMUSIC</b>.</p>
           <button class="btn primary" id="btn-video">🎬 Criar vídeo de 1 minuto</button>
           <div class="stem-progress hidden" id="video-progress"><div class="progress"><div id="video-bar"></div></div><p id="video-msg" class="small"></p></div>
           <div class="pane-actions hidden" id="video-actions">
@@ -1075,5 +1093,26 @@
   </div>
   <script type="module">import * as KB from "/keyboard.js"; window.KB = KB; dispatchEvent(new Event("kb-ready"));</script>
   <script src="/app.js"></script>
+  <!-- MODO PALCO -->
+  <dialog id="stage" class="stage">
+    <header class="st-top">
+      <div class="st-kb" id="st-kb"></div>
+      <div class="st-info"><b id="st-title"></b><span><span id="st-key"></span> <span id="st-bpm"></span> · <em id="st-sync"></em></span></div>
+      <div class="st-tools">
+        <button id="st-down" title="Abaixar meio tom">♭</button>
+        <button id="st-up" title="Subir meio tom">♯</button>
+        <button id="st-smaller" title="Letra menor">A−</button>
+        <button id="st-bigger" title="Letra maior">A+</button>
+        <button id="st-close" title="Sair do modo palco">✕</button>
+      </div>
+    </header>
+    <div class="st-count" id="st-count"></div>
+    <div class="st-lyrics" id="st-lyrics"></div>
+    <footer class="st-bottom">
+      <button id="st-play" class="st-play">▶</button>
+      <div class="st-progress"><div id="st-prog"></div></div>
+      <span id="st-time">0:00</span>
+    </footer>
+  </dialog>
 </body>
 </html>
