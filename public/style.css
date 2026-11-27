@@ -1213,3 +1213,18 @@ dialog { max-width: calc(100vw - 16px); }
 .qd-pct { flex: none; margin-left: auto; font-family: var(--mono); font-size: 0.8rem; color: #f9a8d4; }
 .qd-bar { max-width: none; height: 5px; margin: 6px 0 0; }
 @media (max-width: 520px) { .session-pct, .session-time { font-size: 1.15rem; } }
+
+/* Referência do YouTube */
+.ref-yt { margin-top: 10px; display: grid; gap: 6px; }
+.ref-yt-or { font-size: 0.78rem; font-weight: 700; color: var(--muted); }
+.ref-yt-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ref-yt-row #ref-yt-url { flex: 1 1 260px; min-width: 0; }
+.ref-yt-start { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.ref-yt-start input { width: 64px; text-align: center; padding: 8px 6px; }
+.ref-yt-row select { width: auto; }
+.ref-yt small { font-size: 0.72rem; }
+@media (max-width: 520px) { .ref-yt-row #ref-yt-go { flex: 1 1 100%; } }
+
+/* Player: capa e nome abrem a música que está tocando */
+#player .p-track { cursor: pointer; }
+#player .p-track:active { opacity: 0.75; }

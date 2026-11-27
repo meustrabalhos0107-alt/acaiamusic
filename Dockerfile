@@ -4,7 +4,7 @@ FROM node:22-slim
 # Python + ferramenta do Kaggle (o app liga o estúdio de música no Kaggle sozinho)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates \
- && pip3 install --break-system-packages --no-cache-dir kaggle six \
+ && pip3 install --break-system-packages --no-cache-dir kaggle six "yt-dlp[default]" \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

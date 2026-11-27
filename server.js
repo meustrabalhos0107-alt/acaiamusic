@@ -16,6 +16,7 @@ import { initSettings, getSettings, saveSettings, kaggleHealth, kaggleConfigured
 import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio, requestGpu } from "./kaggle-auto.js";
 import { getLiturgy, massPlan } from "./liturgy.js";
 import { initPersist } from "./persist.js";
+import { youtubeReference } from "./youtube.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(here, "data");
@@ -790,6 +791,19 @@ const queueView = () => {
     history,
   };
 };
+// Áudio de referência tirado de um vídeo do YouTube (trecho de até 60 s, em MP3)
+let ytBusy = 0;
+app.post("/api/reference/youtube", async (req, res) => {
+  if (ytBusy >= 2) return res.status(429).json({ error: "Já estou baixando outros vídeos. Tente em instantes." });
+  ytBusy++;
+  try {
+    res.json(await youtubeReference(req.body?.url, { start: req.body?.start, seconds: req.body?.seconds }));
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  } finally {
+    ytBusy--;
+  }
+});
 app.get("/api/queue", (_req, res) => res.json(queueView()));
 // Pausar / retomar: a música que já está sendo criada termina; as próximas esperam
 app.post("/api/queue/pause", async (req, res) => {

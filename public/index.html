@@ -237,6 +237,16 @@
               <span class="ref-text"><b id="ref-label">Enviar um áudio para a IA se inspirar</b><small id="ref-sub">MP3, WAV ou M4A · até 10 MB · a IA imita o estilo, o clima e a sonoridade</small></span>
               <button type="button" id="ref-clear" class="hidden" aria-label="Remover áudio">✕</button>
             </label>
+            <div class="ref-yt" id="ref-yt">
+              <span class="ref-yt-or">ou use um vídeo do YouTube</span>
+              <div class="ref-yt-row">
+                <input type="url" id="ref-yt-url" inputmode="url" placeholder="Cole o link: youtube.com/watch?v=… ou youtu.be/…" autocomplete="off" />
+                <label class="ref-yt-start" title="De onde começar o trecho (minuto:segundo)">a partir de <input type="text" id="ref-yt-start" value="0:30" inputmode="numeric" maxlength="6" /></label>
+                <select id="ref-yt-len" aria-label="Duração do trecho"><option value="30">30 s</option><option value="45" selected>45 s</option><option value="60">60 s</option></select>
+                <button type="button" class="btn ghost sm" id="ref-yt-go">Usar este vídeo</button>
+              </div>
+              <small class="muted">A IA se inspira no estilo, no clima e na sonoridade do trecho (não copia a música). Use vídeos que você tem direito de usar.</small>
+            </div>
             <audio id="ref-audio" class="hidden" controls></audio>
           </section>
 
@@ -554,7 +564,7 @@
   <div id="player" class="player hidden">
     <div class="p-track">
       <div id="player-cover" class="cover xs"></div>
-      <div class="p-meta"><strong id="player-title"></strong><small id="player-sub"></small></div>
+      <div class="p-meta" title="Abrir a música que está tocando"><strong id="player-title"></strong><small id="player-sub"></small></div>
     </div>
     <div class="p-center">
       <div class="p-controls">

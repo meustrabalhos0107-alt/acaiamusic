@@ -515,10 +515,40 @@ $("#ref-file").addEventListener("change", (e) => {
   };
   reader.readAsDataURL(f);
 });
+// Referência a partir de um link do YouTube: o servidor baixa o trecho e devolve o MP3
+const ytStart = (v) => {
+  const m = /^(?:(\d+):)?(\d{1,2})$/.exec(String(v || "").trim());
+  return m ? Number(m[1] || 0) * 60 + Number(m[2]) : Number(v) || 0;
+};
+$("#ref-yt-url").addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), $("#ref-yt-go").click()));
+$("#ref-yt-go").addEventListener("click", async () => {
+  const url = $("#ref-yt-url").value.trim();
+  if (!url) return toast("Cole o link de um vídeo do YouTube.", true);
+  const btn = $("#ref-yt-go");
+  btn.disabled = true;
+  btn.textContent = "Baixando o trecho…";
+  try {
+    const r = await api("/api/reference/youtube", { method: "POST", body: JSON.stringify({ url, start: ytStart($("#ref-yt-start").value), seconds: Number($("#ref-yt-len").value) }) });
+    state.reference = { name: r.name, data: r.data, youtube: r.youtube };
+    $("#ref-label").textContent = `▶ ${r.title}`;
+    $("#ref-sub").textContent = `Trecho do YouTube · ${fmt(r.start)} a ${fmt(r.start + Math.min(r.seconds, (r.duration || 9e9) - r.start))} · a IA vai se inspirar neste áudio`;
+    $("#ref-drop").classList.add("has");
+    $("#ref-clear").classList.remove("hidden");
+    $("#ref-audio").src = r.data;
+    $("#ref-audio").classList.remove("hidden");
+    toast("🎧 Trecho do vídeo pronto como referência ✓", false, 3000);
+  } catch (err) {
+    toast(err.message, true, 9000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Usar este vídeo";
+  }
+});
 $("#ref-clear").addEventListener("click", (e) => {
   e.preventDefault();
   state.reference = null;
   $("#ref-file").value = "";
+  $("#ref-yt-url").value = "";
   $("#ref-label").textContent = "Enviar um áudio para a IA se inspirar";
   $("#ref-sub").textContent = "MP3, WAV ou M4A · até 10 MB · a IA imita o estilo, o clima e a sonoridade";
   $("#ref-drop").classList.remove("has");
@@ -3415,6 +3445,8 @@ $("#btn-next").onclick = () => step(1);
 $("#btn-prev").onclick = () => (audio.currentTime > 3 ? (audio.currentTime = 0) : step(-1));
 $("#p-fav").onclick = () => state.current && toggleFav(state.songs.find((s) => s.id === state.current.id) || state.current);
 $("#p-open").onclick = () => state.current && openSong(state.songs.find((s) => s.id === state.current.id) || state.current);
+// tocar na capa ou no nome da música do player (no celular, o botão de abrir fica escondido) abre a música que está tocando
+$("#player .p-track").addEventListener("click", () => $("#p-open").click());
 const syncPlay = () => {
   $("#btn-play").innerHTML = audio.paused ? PLAY_SVG : PAUSE_SVG;
   if ($("#view-library").classList.contains("active")) renderLibrary();
