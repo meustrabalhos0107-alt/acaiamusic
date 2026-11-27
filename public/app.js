@@ -558,7 +558,43 @@ $("#ref-clear").addEventListener("click", (e) => {
   $("#ref-audio").removeAttribute("src");
 });
 
+// ---- Batida do teclado Yamaha PSR-E343 (a lista vem de /keyboard.js) ----
+state.keyboardStyle = 0;
+const kbPad = (n) => String(n).padStart(3, "0");
+function kbCurrent() {
+  return window.KB?.pickKeyboardStyle({ genre: state.genre?.[0], genreTags: state.genre?.[1], bpm: state.bpm, form: state.form, moods: (state.moods || []).map((m) => m[0]), keyboardStyle: state.keyboardStyle });
+}
+function updateKb() {
+  const s = kbCurrent();
+  if (!s) return;
+  $("#lcd-kb").textContent = kbPad(s.n);
+  $("#kb-num").textContent = kbPad(s.n);
+  $("#kb-name").textContent = `${s.name}${state.keyboardStyle ? "" : " · automático"}`;
+  $("#kb-hint").innerHTML = `No PSR-E343: aperte <b>STYLE</b>, digite <b>${kbPad(s.n)}</b> e ajuste o <b>TEMPO</b> para <b>${state.bpm} BPM</b>. A música é criada com esta batida.`;
+}
+function fillKb() {
+  if (!window.KB || $("#kb-style").options.length > 1) return updateKb();
+  const groups = {};
+  for (const s of window.KB.KEYBOARD_STYLES) (groups[s.cat] ||= []).push(s);
+  $("#kb-style").insertAdjacentHTML(
+    "beforeend",
+    Object.entries(groups).map(([cat, list]) => `<optgroup label="${esc(cat)}">${list.map((s) => `<option value="${s.n}">${kbPad(s.n)} · ${esc(s.name)}</option>`).join("")}</optgroup>`).join(""),
+  );
+  $("#kb-style").value = String(state.keyboardStyle || 0);
+  updateKb();
+}
+$("#kb-style").addEventListener("change", (e) => {
+  state.keyboardStyle = Number(e.target.value) || 0;
+  updateKb();
+});
+addEventListener("kb-ready", fillKb);
+setTimeout(fillKb, 0);
+// qualquer escolha no estúdio (estilo, andamento, forma…) pode mudar a batida automática
+$("#view-create").addEventListener("click", () => setTimeout(updateKb, 0));
+$("#view-create").addEventListener("change", () => setTimeout(updateKb, 0));
+
 function updateLcd() {
+  setTimeout(updateKb, 0);
   $("#lcd-mode").textContent = state.mode === "catolica" ? "LITÚRGICO" : "LIVRE";
   $("#lcd-bpm").textContent = state.bpm;
   $("#lcd-key").textContent = state.keyNote ? keyLabel() : "AUTO";
@@ -589,6 +625,7 @@ function musicOptions() {
     voiceTags: [state.voice[1], ...(instrumental ? [] : state.voiceStyles.map((v) => v[1]))],
     voiceStyles: instrumental ? [] : state.voiceStyles.map((v) => v[0]),
     quality: state.quality,
+    keyboardStyle: state.keyboardStyle || 0,
   };
 }
 
@@ -2060,7 +2097,7 @@ function openSong(song) {
   const o = song.options || {};
   $("#dlg-tags").innerHTML = [
     o.mode === "catolica" && `⛪ ${o.moment}`, o.mode === "catolica" && o.season, song.genre, o.bpm && `${o.bpm} BPM`,
-    o.key && `Tom ${o.key.replace(" major", "").replace(" minor", "m")}`, song.voice, ...(o.instruments || []),
+    o.key && `Tom ${o.key.replace(" major", "").replace(" minor", "m")}`, song.keyboard && `🎹 PSR-E343 · Estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}`, song.voice, ...(o.instruments || []),
   ].filter(Boolean).map((s) => `<span>${esc(s)}</span>`).join("");
   $("#dlg-download").href = song.url;
   $("#dlg-download").download = `${safeName(song.title)}.mp3`;
@@ -2322,7 +2359,7 @@ function specGroups(song) {
     ]]);
   groups.push(
     ["Tema", [["Ideia", sp.idea || "—"]]],
-    ["Estilo", [["Gênero", o.genre], ["Clima", (o.moods || []).join(", ") || "—"], ["Referência", song.reference ? `🎧 ${song.reference}` : null]]],
+    ["Estilo", [["Gênero", o.genre], ["Batida do teclado", song.keyboard ? `${song.keyboard.model || "PSR-E343"}: estilo ${kbPad(song.keyboard.n)} ${song.keyboard.name}${song.keyboard.auto ? " (automático)" : ""}` : null], ["Clima", (o.moods || []).join(", ") || "—"], ["Referência", song.reference ? `🎧 ${song.reference}` : null]]],
     ["Tempo e tom", [["Andamento", o.bpm ? `${o.bpm} BPM${o.tempo === "auto" ? " (automático)" : ""}` : "automático"], ["Tom", keyTxt], ["Progressão", o.chordProgression || null]]],
     ["Instrumentos e vozes", [["Instrumentos", (o.instruments || []).join(", ") || "automático"], ["Voz", o.voice], ["Timbre", (o.voiceStyles || []).join(", ") || null]]],
     ["Saída", [
@@ -2375,6 +2412,8 @@ function applySpec(song) {
   }
   $("#idea").value = sp.idea || "";
   $("#idea").dispatchEvent(new Event("input"));
+  state.keyboardStyle = o.keyboardStyle || 0;
+  $("#kb-style").value = String(state.keyboardStyle);
   for (const [cat, list] of Object.entries(GENRES)) {
     const g = list.find((x) => x[0] === o.genre);
     if (g) {

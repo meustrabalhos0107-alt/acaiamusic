@@ -144,6 +144,7 @@
           <div><small>BPM</small><b id="lcd-bpm">84</b></div>
           <div><small>TOM</small><b id="lcd-key">AUTO</b></div>
           <div><small>DURAÇÃO</small><b id="lcd-dur">1:00</b></div>
+          <div title="Número do estilo (batida) no teclado Yamaha PSR-E343"><small>BATIDA</small><b id="lcd-kb">AUTO</b></div>
           <div class="wide"><small>MOMENTO</small><b id="lcd-moment">ENTRADA</b></div>
         </div>
       </header>
@@ -230,6 +231,12 @@
             <div class="chips" id="genre-chips"></div>
             <p class="sub-label">Clima <em>até 3</em> <small class="sum" id="sum-mood"></small></p>
             <div class="chips" id="mood-chips"></div>
+            <p class="sub-label">🎹 Batida do teclado <em>Yamaha PSR-E343</em></p>
+            <div class="kb-pick">
+              <select id="kb-style" aria-label="Estilo (batida) do teclado Yamaha PSR-E343"><option value="0">Automático (combina com o estilo escolhido)</option></select>
+              <div class="kb-show" id="kb-show"><b id="kb-num">—</b><span id="kb-name"></span></div>
+            </div>
+            <small class="muted" id="kb-hint">A música é criada com a batida deste estilo do teclado. No PSR-E343: aperte STYLE, digite o número e ajuste o TEMPO.</small>
             <p class="sub-label">Áudio de referência <em>opcional · experimental</em></p>
             <label class="ref-drop" id="ref-drop">
               <input type="file" id="ref-file" accept="audio/*" hidden />
@@ -1044,6 +1051,7 @@
       <small id="login-err" class="login-err"></small>
     </form>
   </div>
+  <script type="module">import * as KB from "/keyboard.js"; window.KB = KB; dispatchEvent(new Event("kb-ready"));</script>
   <script src="/app.js"></script>
 </body>
 </html>

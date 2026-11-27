@@ -17,6 +17,7 @@ import { initAuto, autoState, kaggleUser, kaggleQuota, startStudio, stopStudio, 
 import { getLiturgy, massPlan } from "./liturgy.js";
 import { initPersist } from "./persist.js";
 import { youtubeReference } from "./youtube.js";
+import { KEYBOARD_MODEL, pickKeyboardStyle } from "./keyboard.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(here, "data");
@@ -126,6 +127,7 @@ app.use(["/api", "/audio"], (req, res, next) => (authed(req) ? next() : res.stat
 
 // arquivos públicos (o .well-known/assetlinks.json é exigido pelo APK do Android)
 app.use(express.static(path.join(here, "public"), { dotfiles: "allow" }));
+app.get("/keyboard.js", (_req, res) => res.type("text/javascript").sendFile(path.join(here, "keyboard.js"))); // lista de batidas do teclado, usada também no app
 app.use("/audio", express.static(SONGS_DIR));
 
 // ---------- Biblioteca (arquivo JSON) ----------
@@ -374,7 +376,9 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
   // texto livre: o que é melodia, música ou letra (da criação e, no "Refazer", do pedido de ajuste)
   const ideaParts = spec.ideaParts || (spec.idea ? await splitIdea(spec.idea).catch(() => null) : null);
   const noteParts = spec.note ? await splitIdea(spec.note).catch(() => null) : null;
-  const extraTags = [...ideaMusicTags(noteParts), ...ideaMusicTags(ideaParts)];
+  // batida do teclado (escolhida ou automática): a música é criada nesse ritmo
+  const kb = pickKeyboardStyle(options);
+  const extraTags = [...ideaMusicTags(noteParts), kb.tags, ...ideaMusicTags(ideaParts)];
   if (noteParts?.lyrics && plan?.sections?.length && options.voice !== "Instrumental") {
     try {
       plan = await refineLyrics({ plan, custom: noteParts.lyrics, options, language });
@@ -584,6 +588,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       ...(pron?.heard ? { hearing: { words: pron.heard.words, chords: pron.heard.chords, key: pron.heard.key, tempo: pron.heard.tempo } } : {}),
       ...(reference ? { reference: String(reference.name || "").slice(0, 120) } : {}),
       genre: options.genre,
+      keyboard: { model: KEYBOARD_MODEL, n: kb.n, name: kb.name, cat: kb.cat, auto: !options.keyboardStyle },
       mood: options.moods.join(", "),
       voice: options.voice,
       options,

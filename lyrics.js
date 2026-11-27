@@ -170,6 +170,8 @@ export function cleanOptions(o = {}) {
     voiceStyles: strList(o.voiceStyles, 2),
     quality: o.quality === "high" ? "high" : "fast",
     chordProgression: str(o.chordProgression, 80).replace(/[^A-Ga-g0-9#/ mjsuadi°º+()]/g, ""),
+    // estilo (batida) do teclado Yamaha PSR-E343 escolhido; 0 = automático
+    keyboardStyle: Number(o.keyboardStyle) >= 1 && Number(o.keyboardStyle) <= 136 ? Math.round(Number(o.keyboardStyle)) : 0,
   };
 }
 
