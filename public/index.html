@@ -316,6 +316,10 @@
                   <option value="pt">Português</option>
                   <option value="es">Espanhol</option>
                   <option value="en">Inglês</option>
+                  <option value="it">Italiano</option>
+                  <option value="fr">Francês</option>
+                  <option value="de">Alemão</option>
+                  <option value="la">Latim</option>
                 </select>
               </div>
               <div class="field">
@@ -632,7 +636,25 @@
     <!-- Letra -->
     <div class="tab-pane on" data-p="letra">
       <div class="refs hidden" id="dlg-refs"></div>
-      <pre id="dlg-lyrics" class="dlg-lyrics"></pre>
+      <div class="tr-bar">
+        <span>🌐 Tradução</span>
+        <select id="tr-lang" aria-label="Idioma da tradução"><option value="en">🇬🇧 Inglês</option><option value="es">🇪🇸 Espanhol</option><option value="it">🇮🇹 Italiano</option><option value="fr">🇫🇷 Francês</option><option value="de">🇩🇪 Alemão</option><option value="la">✝️ Latim</option><option value="pt">🇧🇷 Português</option></select>
+        <button class="btn ghost sm" id="tr-go">Traduzir</button>
+      </div>
+      <div class="lyr-cols" id="lyr-cols">
+        <div><small class="lyr-tag" id="lyr-orig-tag">Original</small><pre id="dlg-lyrics" class="dlg-lyrics"></pre></div>
+        <div class="tr-box hidden" id="tr-box">
+          <small class="lyr-tag" id="tr-tag">Tradução</small>
+          <h4 id="tr-title"></h4>
+          <pre id="tr-lyrics" class="dlg-lyrics"></pre>
+          <div class="pane-actions">
+            <button class="btn primary sm" id="tr-sing">🎤 Gravar cantando neste idioma</button>
+            <button class="btn ghost sm" id="tr-copy">⧉ Copiar tradução</button>
+            <button class="btn ghost sm" id="tr-redo" title="Pedir outra tradução">↻ Outra tradução</button>
+          </div>
+          <small class="muted">Gravar cria uma <b>música nova</b> na biblioteca, com o mesmo estilo, vozes e batida. A original continua igual.</small>
+        </div>
+      </div>
       <div class="pane-actions">
         <button class="btn primary sm" id="proj-song">📽 Projetar letra</button>
         <button class="btn ghost sm" id="copy-lyrics">⧉ Copiar letra</button>

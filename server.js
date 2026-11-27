@@ -6,6 +6,7 @@ import path from "node:path";
 import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client, handle_file } from "@gradio/client";
+import { LANG_NAMES, SUNG_LANGS, translateLyrics } from "./lyrics.js";
 import { OFFICIAL_TEXTS, LyricsError, buildTags, cleanOptions, cleanPlan, generateChords, ideaMusicTags, illustrationPrompt, refineLyrics, sanitizeChords, splitIdea, writeLyrics } from "./lyrics.js";
 import { masterOrPlain } from "./audio.js";
 import { chordSheetFromAudio, hearingUrl, illustrate, lyricScore, listen } from "./hearing.js";
@@ -354,7 +355,7 @@ async function generateOn15Spaces({ params, options, language, reference }, set)
       at("captions", params.prompt);
       at("lyrics", params.lyrics);
       if (options.bpm) at("bpm", options.bpm);
-      at("vocal_language", ["pt", "en", "es"].includes(language) ? language : "unknown");
+      at("vocal_language", SUNG_LANGS.includes(language) ? language : "unknown");
       at("audio_duration", params.audio_duration);
       at("batch_size_input", 1);
       if (refBlob) at("reference_audio", handle_file(refBlob));
@@ -600,6 +601,7 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
       // Ficha técnica: tudo o que foi escolhido para criar esta música
       spec: {
         idea: String(spec.idea || "").slice(0, 1500),
+        ...(spec.translatedFrom ? { translatedFrom: spec.translatedFrom } : {}),
         ...(ideaParts ? { ideaParts } : {}),
         ...(spec.note ? { note: String(spec.note).slice(0, 1500), noteParts } : {}),
         lyricsSource: ["ia", "propria", "missal"].includes(spec.lyricsSource) ? spec.lyricsSource : "ia",
@@ -1088,6 +1090,59 @@ app.get("/api/songs/:id/registro/:file/pagina", async (req, res) => {
 
 // Refazer a música do mesmo jeito (letra, estilo, vozes), com revisão de pronúncia pelo Whisper.
 // A nova gravação substitui a antiga no mesmo lugar.
+// Tradução da letra (a original não muda): fica guardada na música, uma por idioma
+async function songTranslation(song, lang, force = false) {
+  if (!force && song.translations?.[lang]) return song.translations[lang];
+  if (!song.sections?.length) throw Object.assign(new Error("Esta música não tem letra para traduzir."), { status: 400 });
+  const tr = await translateLyrics({ plan: { title: song.title, sections: song.sections }, from: song.spec?.language || "pt", to: lang, options: song.options || {} });
+  const entry = { ...tr, at: new Date().toISOString() };
+  await updateSongs((songs) => songs.map((s) => (s.id === song.id ? { ...s, translations: { ...(s.translations || {}), [lang]: entry } } : s)));
+  return entry;
+}
+app.post("/api/songs/:id/translate", async (req, res) => {
+  const lang = String(req.body?.lang || "");
+  if (!LANG_NAMES[lang]) return res.status(400).json({ error: "Escolha um idioma." });
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  try {
+    res.json(await songTranslation(song, lang, Boolean(req.body?.force)));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    lyricsError(res, e);
+  }
+});
+// Gravar a música cantada no idioma escolhido: vira uma MÚSICA NOVA (a original continua igual)
+app.post("/api/songs/:id/sing", async (req, res) => {
+  const lang = String(req.body?.lang || "");
+  if (!SUNG_LANGS.includes(lang)) return res.status(400).json({ error: "Escolha um idioma." });
+  const song = (await loadSongs()).find((s) => s.id === req.params.id);
+  if (!song) return res.status(404).json({ error: "Música não encontrada." });
+  if (!song.options) return res.status(400).json({ error: "Esta música é antiga e não guardou como foi feita. Use ✎ Nova versão." });
+  let tr;
+  try {
+    tr = await songTranslation(song, lang);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    return lyricsError(res, e);
+  }
+  const id = randomUUID();
+  enqueueSong(
+    id,
+    {
+      plan: { title: tr.title, styles: song.styles || [], sections: tr.sections.map((x, k) => ({ name: song.sections[k]?.name || x.name, lines: x.lines })), references: song.references || [], notes: song.notes || "" },
+      duration: Number(song.spec?.requestedDuration) || song.duration || 120,
+      language: lang,
+      meta: { cover: song.cover },
+      options: cleanOptions(song.options),
+      reference: null,
+      spec: { idea: song.spec?.idea, ideaParts: song.spec?.ideaParts, lyricsSource: song.spec?.lyricsSource, translatedFrom: { id: song.id, title: song.title, lang: song.spec?.language || "pt" } },
+      check: Boolean(hearingUrl()),
+    },
+    { label: `${tr.title} (${LANG_NAMES[lang]})` },
+  );
+  res.json({ jobId: id, title: tr.title });
+});
+
 app.post("/api/songs/:id/redo", async (req, res) => {
   const song = (await loadSongs()).find((s) => s.id === req.params.id);
   if (!song) return res.status(404).json({ error: "Música não encontrada." });

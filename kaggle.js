@@ -91,7 +91,7 @@ export async function generateKaggle({ params, options, language, reference }, s
     prompt: params.prompt,
     lyrics: params.lyrics,
     audio_duration: params.audio_duration,
-    vocal_language: ["pt", "en", "es"].includes(language) ? language : "unknown",
+    vocal_language: ["pt", "en", "es", "it", "fr", "de", "la"].includes(language) ? language : "unknown",
     inference_steps: options.quality === "high" ? 16 : 8,
     batch_size: 1,
     audio_format: "mp3",

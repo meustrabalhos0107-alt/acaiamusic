@@ -1242,3 +1242,14 @@ dialog { max-width: calc(100vw - 16px); }
 .kb-show b { font-size: 1.3rem; text-shadow: 0 0 10px rgba(255,181,71,0.5); }
 .kb-show span { font-size: 0.8rem; }
 #kb-hint { display: block; margin-top: 4px; font-size: 0.74rem; }
+
+/* Tradução da letra */
+.tr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; padding: 8px 10px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.tr-bar > span { font-weight: 700; font-size: 0.85rem; }
+.tr-bar select { width: auto; flex: 1 1 140px; min-width: 0; }
+.lyr-cols { display: grid; gap: 14px; }
+.lyr-cols.two { grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+.lyr-tag { display: inline-block; margin-bottom: 6px; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #f9a8d4; }
+.tr-box h4 { margin: 0 0 8px; }
+.tr-box { padding: 12px; border-radius: 14px; border: 1px solid rgba(244, 114, 182, 0.35); background: rgba(244, 114, 182, 0.05); }
+.tr-box .pane-actions { flex-wrap: wrap; }

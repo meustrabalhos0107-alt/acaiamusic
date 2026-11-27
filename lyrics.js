@@ -2,7 +2,9 @@
 // LETRAS: compositor por IA (Pollinations, gratuito) + textos do Missal
 // =====================================================================
 
-const LANG_NAMES = { pt: "Português do Brasil", en: "Inglês", es: "Espanhol" };
+export const LANG_NAMES = { pt: "Português do Brasil", en: "Inglês", es: "Espanhol", it: "Italiano", fr: "Francês", de: "Alemão", la: "Latim eclesiástico" };
+// idiomas em que o estúdio (ACE-Step 1.5) sabe cantar e que o app oferece
+export const SUNG_LANGS = Object.keys(LANG_NAMES);
 const POLL_URL = "https://text.pollinations.ai/openai";
 const POLL_KEY = (process.env.POLLINATIONS_KEY || "").trim(); // opcional: aumenta o limite
 
@@ -637,4 +639,27 @@ Não invente nada que a pessoa não pediu; parte que não existir fica "". Respo
 export function ideaMusicTags(p) {
   if (!p) return [];
   return [p.melodyTags || (p.melody && `melody: ${p.melody}`), p.musicTags || (p.music && `arrangement: ${p.music}`)].filter(Boolean).map((t) => t.slice(0, 240));
+}
+
+// ---------- Tradução CANTÁVEL da letra (a original não muda) ----------
+// Mesmo número de partes e de versos, métrica parecida (para caber na mesma melodia) e rima
+// quando possível. Partes fixas da Missa usam o texto litúrgico oficial do idioma de destino.
+export async function translateLyrics({ plan, from = "pt", to, options: o = {} }) {
+  if (!LANG_NAMES[to]) throw new LyricsError("Idioma não disponível.");
+  const current = plan.sections.map((s) => `[${s.name}]\n${s.lines.join("\n")}`).join("\n\n");
+  const system = `Você é tradutor de letras de música para CANTAR (não tradução literal).
+Regras:
+- Traduza para ${LANG_NAMES[to]}, mantendo o sentido, a fé e as imagens da letra original.
+- MESMO número de partes e MESMO número de versos em cada parte, na mesma ordem; nomes das partes traduzidos.
+- Cada verso com número de sílabas parecido com o original (para caber na mesma melodia) e acentos naturais; rime quando der, sem forçar.
+- Textos litúrgicos fixos (Glória, Santo, Cordeiro de Deus, Senhor tende piedade, Pai-Nosso, Aleluia, salmos conhecidos): use a tradução litúrgica OFICIAL do idioma de destino${to === "la" ? " (Missal Romano em latim: Gloria in excelsis Deo, Sanctus, Agnus Dei, Kyrie eleison, Pater noster…)" : ""}.
+- Nada de comentários. Responda SOMENTE com JSON: {"title":"...","sections":[{"name":"...","lines":["..."]}]}`;
+  const user = `${o.mode === "catolica" ? `Canto litúrgico católico (momento: ${o.moment || "livre"}; tempo: ${o.season || "—"}).\n` : ""}Idioma original: ${LANG_NAMES[from] || from}
+Título: ${plan.title}
+Letra:
+${current}`;
+  const out = cleanPlan(await callLLM(system, user), false);
+  // se a IA juntou ou cortou partes, alinha com o original (mesma estrutura para cantar)
+  if (out.sections.length !== plan.sections.length) out.sections = out.sections.slice(0, plan.sections.length);
+  return { title: out.title, sections: out.sections };
 }

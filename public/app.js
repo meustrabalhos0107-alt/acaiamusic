@@ -2137,6 +2137,7 @@ function openSong(song) {
   $("#dlg-download").href = song.url;
   $("#dlg-download").download = `${safeName(song.title)}.mp3`;
   $("#dlg-play").onclick = () => play(song);
+  resetTranslation(song); // tradução da letra (a original não muda)
   renderVersions(song);
   $("#dlg-fav").onclick = () => toggleFav(song);
   $("#dlg-album").onclick = () => albumsForSong(song);
@@ -2506,6 +2507,67 @@ $("#copy-lyrics").onclick = async () => {
   toast("Letra copiada ✓", false, 1800);
 };
 $("#wa-lyrics").onclick = () => shareText(lyricsText(dlgSong));
+
+// ---------------- Tradução da letra (a original não muda) ----------------
+const trText = (tr) => tr.sections.map((s) => `[${s.name}]\n${s.lines.join("\n")}`).join("\n\n");
+function showTranslation(song, lang) {
+  const tr = song.translations?.[lang];
+  $("#tr-box").classList.toggle("hidden", !tr);
+  $("#lyr-cols").classList.toggle("two", Boolean(tr));
+  if (!tr) return;
+  $("#tr-tag").textContent = `Tradução · ${LANG_LABEL[lang] || lang}`;
+  $("#tr-title").textContent = tr.title;
+  $("#tr-lyrics").textContent = trText(tr);
+  $("#tr-sing").textContent = `🎤 Gravar cantando em ${LANG_LABEL[lang] || lang}`;
+}
+function resetTranslation(song) {
+  const own = song.spec?.language || "pt";
+  $("#lyr-orig-tag").textContent = `Original · ${LANG_LABEL[own] || own}`;
+  $$("#tr-lang option").forEach((op) => (op.hidden = op.value === own));
+  const have = Object.keys(song.translations || {}).find((l) => l !== own);
+  const sel = $("#tr-lang");
+  if (have) sel.value = have;
+  else if (sel.value === own || !sel.value) sel.value = own === "en" ? "es" : "en";
+  showTranslation(song, have || "");
+}
+async function translateNow(force = false) {
+  const song = dlgSong, lang = $("#tr-lang").value;
+  if (!force && song.translations?.[lang]) return showTranslation(song, lang);
+  const btn = force ? $("#tr-redo") : $("#tr-go");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Traduzindo…";
+  try {
+    const tr = await api(`/api/songs/${song.id}/translate`, { method: "POST", body: JSON.stringify({ lang, force }) });
+    song.translations = { ...(song.translations || {}), [lang]: tr };
+    if (dlgSong?.id === song.id) showTranslation(song, lang);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+$("#tr-go").onclick = () => translateNow(false);
+$("#tr-redo").onclick = () => translateNow(true);
+$("#tr-lang").onchange = () => showTranslation(dlgSong, $("#tr-lang").value);
+$("#tr-copy").onclick = async () => {
+  const tr = dlgSong.translations?.[$("#tr-lang").value];
+  if (!tr) return;
+  await navigator.clipboard.writeText(`${tr.title}\n\n${trText(tr)}`);
+  toast("Tradução copiada ✓", false, 1800);
+};
+$("#tr-sing").onclick = async () => {
+  const song = dlgSong, lang = $("#tr-lang").value;
+  if (!confirm(`Gravar “${song.title}” cantada em ${LANG_LABEL[lang]}?\n\nVira uma música nova na biblioteca, com o mesmo estilo, vozes e batida. A original continua igual.`)) return;
+  try {
+    const r = await api(`/api/songs/${song.id}/sing`, { method: "POST", body: JSON.stringify({ lang }) });
+    toast(`🎤 “${r.title}” (${LANG_LABEL[lang]}) entrou na fila de criação. A original continua igual.`, false, 7000);
+    refreshQueue();
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
 
 // ---------------- Cifra ----------------
 const SHARPS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -3588,7 +3650,7 @@ document.addEventListener("keydown", (e) => {
 // ETAPAS DO CONSOLE (uma por vez, com resumo e "alterar")
 // =========================================================
 let wzIndex = 0;
-const LANG_LABEL = { pt: "Português", es: "Espanhol", en: "Inglês" };
+const LANG_LABEL = { pt: "Português", es: "Espanhol", en: "Inglês", it: "Italiano", fr: "Francês", de: "Alemão", la: "Latim" };
 const STEP_INFO = {
   Modo: ["O que vamos criar?", "Escolha entre um canto para a Santa Missa ou uma música livre."],
   Liturgia: ["Momento da celebração", "Em que parte da Missa o canto será cantado? Isso orienta a letra e o jeito da música."],
