@@ -1354,7 +1354,32 @@ const cleanLyricEntry = (b) => ({
   references: (Array.isArray(b.references) ? b.references : []).map((x) => String(x).slice(0, 80)).slice(0, 10),
   notes: String(b.notes || "").slice(0, 300),
   source: ["ia", "propria", "missal"].includes(b.source) ? b.source : "propria",
+  // letras guardadas sozinhas pela Missa pronta / Terço (as que a pessoa salva ficam com "")
+  auto: ["missa", "terco"].includes(b.auto) ? b.auto : "",
+  group: String(b.group || "").slice(0, 120),
 });
+// Letras antigas: as que a Missa pronta guardou sozinha chegam em rajadas (várias no mesmo minuto).
+// Marca essas como automáticas, para "Minhas letras" mostrar primeiro as que a pessoa salvou.
+async function markAutoLyrics() {
+  const list = await loadLyricsLib();
+  if (!list.some((l) => l.auto === undefined)) return;
+  const sorted = [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const clusters = [];
+  for (const l of sorted) {
+    const last = clusters.at(-1);
+    if (last && Date.parse(l.createdAt) - Date.parse(last.at(-1).createdAt) <= 120_000) last.push(l);
+    else clusters.push([l]);
+  }
+  const auto = new Map();
+  for (const c of clusters)
+    if (c.length >= 4) {
+      const day = new Date(Date.parse(c[0].createdAt) - 3 * 3600_000).toISOString().slice(0, 10).split("-").reverse().join("/");
+      for (const l of c) auto.set(l.id, `Missa pronta de ${day}`);
+    }
+  await updateLyricsLib((all) => all.map((l) => (l.auto !== undefined ? l : { ...l, auto: auto.has(l.id) ? "missa" : "", group: auto.get(l.id) || l.group || "" })));
+  console.log(`Minhas letras: ${auto.size} letra(s) antigas marcadas como da Missa pronta`);
+}
+setTimeout(() => markAutoLyrics().catch((e) => console.log("Marcar letras automáticas falhou:", e.message)), 8000).unref();
 app.get("/api/lyrics-lib", async (_req, res) => res.json(await loadLyricsLib()));
 app.post("/api/lyrics-lib", async (req, res) => {
   const entry = cleanLyricEntry(req.body || {});
@@ -1667,7 +1692,7 @@ app.post("/api/mass-ready", async (req, res) => {
         }
       }
       const text = lyr.sections.map((s) => `[${s.name}]\n${s.lines.join("\n")}`).join("\n\n");
-      const entry = { id: randomUUID(), ...cleanLyricEntry({ title: lyr.title, text, mode: "catolica", moment: p.moment, season: lit.season, references: lyr.references, notes: lyr.notes, source: lyr.official ? "missal" : "ia" }), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const entry = { id: randomUUID(), ...cleanLyricEntry({ title: lyr.title, text, mode: "catolica", moment: p.moment, season: lit.season, references: lyr.references, notes: lyr.notes, source: lyr.official ? "missal" : "ia", auto: "missa", group: nice }), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await updateLyricsLib((list) => [entry, ...list]);
       await saveItem(i, { kind: "lyric", ref: entry.id });
       plans.push(lyr);
@@ -1734,75 +1759,71 @@ História: ${story}`;
   }
 });
 
-// ---------- Salmo do dia automático ----------
-// Todo dia (a partir das 4 h, horário de Brasília) o app grava o Salmo da liturgia com o texto
-// exato. O servidor grátis dorme quando ninguém usa: um despertador do GitHub (gratuito) o acorda
-// de madrugada, e ao acordar ele confere se o Salmo de hoje já foi gravado.
+// ---------- Salmo de uma data ----------
+// A pessoa escolhe a data; o app lê a liturgia desse dia e grava o Salmo com o texto exato.
+// (Antes era automático todo dia; a pessoa preferiu escolher.)
 const PSALM_DB = path.join(DATA_DIR, "salmo.json");
 const brDate = (ms = Date.now()) => new Date(ms - 3 * 3600_000).toISOString().slice(0, 10);
 async function loadPsalmCfg() {
   try {
-    return { enabled: true, voice: "Feminina", genre: "Canto Litúrgico", genreTags: "", days: {}, ...JSON.parse(await fs.readFile(PSALM_DB, "utf8")) };
+    return { voice: "Feminina", genre: "Canto Litúrgico", genreTags: "", days: {}, ...JSON.parse(await fs.readFile(PSALM_DB, "utf8")), enabled: false };
   } catch {
-    return { enabled: true, voice: "Feminina", genre: "Canto Litúrgico", genreTags: "", days: {} };
+    return { voice: "Feminina", genre: "Canto Litúrgico", genreTags: "", days: {}, enabled: false };
   }
 }
-let psalmBusy = false;
-async function dailyPsalm(force = false) {
-  if (psalmBusy) return;
-  psalmBusy = true;
-  try {
-    const cfg = await loadPsalmCfg();
-    const today = brDate();
-    const hour = new Date(Date.now() - 3 * 3600_000).getUTCHours();
-    if ((!cfg.enabled && !force) || cfg.days[today]?.songId || (hour < 4 && !force)) return;
-    const lit = await getLiturgy(today);
-    const ps = lit.readings?.psalm;
-    const item = massPlan(lit, { original: true }).find((p) => p.moment === "Salmo Responsorial");
-    if (!ps?.text || !item?.fixed) return console.log("Salmo do dia: a liturgia de hoje ainda não está disponível.");
-    const options = cleanOptions({ mode: "catolica", moment: "Salmo Responsorial", season: lit.season, occasion: lit.title, genre: cfg.genre, genreTags: cfg.genreTags || undefined, voice: cfg.voice, voiceTags: VOICE_TAGS[cfg.voice] || [], quality: "high" });
-    const sid = randomUUID();
-    enqueueSong(sid, { plan: cleanPlan(item.fixed, false), duration: 150, language: "pt", meta: {}, options, reference: null, spec: { idea: `Salmo do dia · ${lit.title}`, lyricsSource: "missal", psalmOf: today } }, { label: `Salmo do dia · ${ps.ref}` });
-    cfg.days[today] = { songId: sid, ref: ps.ref, refrain: ps.refrain, title: lit.title, at: new Date().toISOString() };
-    cfg.days = Object.fromEntries(Object.entries(cfg.days).sort().slice(-30));
-    await fs.writeFile(PSALM_DB, JSON.stringify(cfg, null, 2));
-    console.log(`Salmo do dia (${today}, ${ps.ref}) entrou na fila de criação.`);
-  } catch (e) {
-    console.log("Salmo do dia falhou:", e.message);
-  } finally {
-    psalmBusy = false;
+async function recordPsalm(date, { voice, genre, genreTags } = {}) {
+  const cfg = await loadPsalmCfg();
+  const lit = await getLiturgy(date);
+  const ps = lit.readings?.psalm;
+  const item = massPlan(lit, { original: true }).find((p) => p.moment === "Salmo Responsorial");
+  if (!ps?.text || !item?.fixed) {
+    const e = new Error(`A liturgia de ${date.split("-").reverse().join("/")} não trouxe o Salmo (a fonte gratuita só tem datas próximas). Tente outra data.`);
+    e.status = 404;
+    throw e;
   }
+  const v = VOICE_TAGS[voice] ? voice : cfg.voice;
+  const options = cleanOptions({ mode: "catolica", moment: "Salmo Responsorial", season: lit.season, occasion: lit.title, genre: genre || cfg.genre, genreTags: (genre ? genreTags : cfg.genreTags) || undefined, voice: v, voiceTags: VOICE_TAGS[v] || [], quality: "high" });
+  const sid = randomUUID();
+  enqueueSong(sid, { plan: { ...cleanPlan(item.fixed, false), title: `Salmo ${ps.ref} · ${date.split("-").reverse().join("/")}` }, duration: 150, language: "pt", meta: {}, options, reference: null, spec: { idea: `Salmo de ${date} · ${lit.title}`, lyricsSource: "missal", psalmOf: date } }, { label: `Salmo ${ps.ref} (${date.split("-").reverse().join("/")})` });
+  cfg.days[date] = { songId: sid, ref: ps.ref, refrain: ps.refrain, title: lit.title, at: new Date().toISOString() };
+  cfg.days = Object.fromEntries(Object.entries(cfg.days).sort().slice(-60));
+  if (VOICE_TAGS[voice]) cfg.voice = voice;
+  if (genre) (cfg.genre = String(genre).slice(0, 40)), (cfg.genreTags = String(genreTags || "").slice(0, 160));
+  await fs.writeFile(PSALM_DB, JSON.stringify(cfg, null, 2));
+  return cfg.days[date];
 }
-setTimeout(() => dailyPsalm(), 25_000).unref();
-setInterval(() => dailyPsalm(), 30 * 60_000).unref();
 app.get("/api/salmo", async (_req, res) => {
   const cfg = await loadPsalmCfg();
   const songs = await loadSongs();
   const days = Object.entries(cfg.days)
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .slice(0, 7)
     .map(([date, d]) => {
       const song = songs.find((s) => s.id === d.songId);
       return { date, ...d, song: song || null, pending: !song && queue.some((q) => q.id === d.songId) };
-    });
-  res.json({ enabled: cfg.enabled, voice: cfg.voice, genre: cfg.genre, today: brDate(), days });
+    })
+    .filter((d) => d.song || d.pending);
+  res.json({ voice: cfg.voice, genre: cfg.genre, today: brDate(), days });
 });
-app.put("/api/salmo", async (req, res) => {
-  const cfg = await loadPsalmCfg();
+// o texto do Salmo de uma data (para conferir antes de gravar)
+app.get("/api/salmo/:date", async (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.params.date) ? req.params.date : brDate();
+  try {
+    const lit = await getLiturgy(date);
+    const ps = lit.readings?.psalm;
+    if (!ps?.text) return res.status(404).json({ error: "Não achei o Salmo desta data na liturgia (a fonte gratuita só tem datas próximas)." });
+    res.json({ date, ref: ps.ref, refrain: ps.refrain, text: ps.text, title: lit.title, season: lit.season });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post("/api/salmo/record", async (req, res) => {
   const b = req.body || {};
-  if (typeof b.enabled === "boolean") cfg.enabled = b.enabled;
-  if (VOICE_TAGS[b.voice]) cfg.voice = b.voice;
-  if (b.genre) (cfg.genre = String(b.genre).slice(0, 40)), (cfg.genreTags = String(b.genreTags || "").slice(0, 160));
-  await fs.writeFile(PSALM_DB, JSON.stringify(cfg, null, 2));
-  if (cfg.enabled) dailyPsalm();
-  res.json({ ok: true, enabled: cfg.enabled });
-});
-app.post("/api/salmo/now", async (_req, res) => {
-  await dailyPsalm(true);
-  const cfg = await loadPsalmCfg();
-  const d = cfg.days[brDate()];
-  if (!d) return res.status(503).json({ error: "A liturgia de hoje ainda não está disponível. Tente mais tarde." });
-  res.json(d);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || "")) ? b.date : brDate();
+  try {
+    res.json({ date, ...(await recordPsalm(date, b)) });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 // ---------- Terço cantado: os 5 mistérios do dia, cada um com um canto curto ----------
@@ -1856,7 +1877,7 @@ Uma estrofe que contempla a cena do mistério (o que aconteceu, com os personage
         }
       }
       const text = lyr.sections.map((s) => `[${s.name}]\n${s.lines.join("\n")}`).join("\n\n");
-      const entry = { id: randomUUID(), ...cleanLyricEntry({ title: lyr.title, text, mode: "catolica", moment: "Livre (tema religioso)", season: "", references: [ref, ...(lyr.references || [])], notes: `${M.name} · ${ORD[i]} mistério: ${title}`, source: "ia" }), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const entry = { id: randomUUID(), ...cleanLyricEntry({ title: lyr.title, text, mode: "catolica", moment: "Livre (tema religioso)", season: "", references: [ref, ...(lyr.references || [])], notes: `${M.name} · ${ORD[i]} mistério: ${title}`, source: "ia", auto: "terco", group: `Terço cantado · ${M.name} (${weekday})` }), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await updateLyricsLib((list) => [entry, ...list]);
       await saveItem(i, { kind: "lyric", ref: entry.id });
       plans.push(lyr);

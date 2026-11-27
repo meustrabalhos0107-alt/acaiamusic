@@ -92,21 +92,3 @@ def harmonia(item: dict):
         return {"error": "Áudio inválido."}
     call = harmonizar.spawn(item)
     return {"call_id": call.object_id}
-
-
-# Despertador do app (gratuito): o servidor grátis do Render dorme quando ninguém usa. Toda
-# madrugada (04:05 em Brasília) este agendamento o acorda; ao acordar, o app grava o Salmo do dia.
-@app.function(image=modal.Image.debian_slim(python_version="3.11"), schedule=modal.Cron("5 7 * * *"), timeout=600)
-def acordar():
-    import time
-    import urllib.request
-
-    for i in range(12):
-        try:
-            with urllib.request.urlopen("https://acaiamusic.onrender.com/manifest.json", timeout=60) as r:
-                if r.status == 200:
-                    print(f"app acordado na tentativa {i + 1}")
-                    return
-        except Exception as e:
-            print(f"tentativa {i + 1}: {e}")
-        time.sleep(20)

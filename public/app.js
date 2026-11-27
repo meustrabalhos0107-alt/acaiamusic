@@ -1113,6 +1113,7 @@ function renderLibrary() {
   $("#library").classList.toggle("hidden", lyr || alb);
   $("#lib-tools").classList.toggle("hidden", lyr || alb);
   $("#lyr-tools").classList.toggle("hidden", !lyr);
+  $("#ly-who").classList.toggle("hidden", !lyr);
   if (lyr) return renderLyricsLib();
   if (alb) return (renderAlbums(), loadAlbums().then(() => state.libMode === "albums" && renderAlbums()));
   const box = $("#library");
@@ -1173,15 +1174,31 @@ async function loadLyricsLib() {
   } catch {
     state.lyricsLib = [];
   }
-  $("#lyr-count").textContent = state.lyricsLib.length || "";
-  $("#ql-lyrics-n").textContent = state.lyricsLib.length || "";
+  countLyrics();
 }
+// "Minhas letras" abre nas que a pessoa salvou; as da Missa pronta/Terço ficam num filtro à parte
+let lyWho = "mine";
+const isAutoLyric = (l) => l.auto === "missa" || l.auto === "terco";
+function countLyrics() {
+  const auto = state.lyricsLib.filter(isAutoLyric).length, mine = state.lyricsLib.length - auto;
+  $("#lyr-count").textContent = mine || "";
+  $("#ql-lyrics-n").textContent = mine || "";
+  $("#ly-n-mine").textContent = mine;
+  $("#ly-n-auto").textContent = auto;
+}
+$$("#ly-who button").forEach((b) =>
+  b.addEventListener("click", () => {
+    lyWho = b.dataset.w;
+    $$("#ly-who button").forEach((x) => x.classList.toggle("on", x === b));
+    renderLyricsLib();
+  }),
+);
 async function saveLyric(entry) {
   if (!entry.text.trim()) return toast("A letra está vazia.", true);
   try {
     const item = await api("/api/lyrics-lib", { method: "POST", body: JSON.stringify(entry) });
     state.lyricsLib.unshift(item);
-    $("#lyr-count").textContent = state.lyricsLib.length;
+    countLyrics();
     toast(`Letra “${item.title}” salva em Minhas letras ✓`, false, 3500);
   } catch (e) {
     toast(e.message, true);
@@ -1216,7 +1233,8 @@ function renderLyricsLib() {
     mass: (a, b) => massRank(a.moment) - massRank(b.moment) || b.createdAt.localeCompare(a.createdAt),
   };
   const list = state.lyricsLib
-    .filter((l) => !q || [l.title, l.text, l.moment, l.season].join(" ").toLowerCase().includes(q))
+    .filter((l) => lyWho === "all" || (lyWho === "auto") === isAutoLyric(l))
+    .filter((l) => !q || [l.title, l.text, l.moment, l.season, l.group].join(" ").toLowerCase().includes(q))
     .filter((l) => !fm || l.moment === fm)
     .filter((l) => !fs || l.season === fs)
     .filter((l) => !fo || (l.source || "propria") === fo)
@@ -1225,12 +1243,23 @@ function renderLyricsLib() {
     box.innerHTML = `<div class="empty"><h3>Nenhuma letra salva</h3><p>No caderno de letra ou na janela de uma música, toque em <b>Salvar letra</b>. Depois é só reutilizar a letra em outros arranjos.</p></div>`;
     return;
   }
-  if (!list.length) return (box.innerHTML = `<div class="empty"><h3>Nada encontrado</h3></div>`);
+  if (!list.length) {
+    const autoN = state.lyricsLib.filter(isAutoLyric).length;
+    box.innerHTML =
+      lyWho === "mine" && !(q || fm || fs || fo)
+        ? `<div class="empty"><h3>Você ainda não salvou nenhuma letra</h3><p>No estúdio, depois de compor, toque em <b>Salvar letra</b> (ou, na janela de uma música, em <b>Salvar em Minhas letras</b>). ${autoN ? `As ${autoN} letras que a Missa pronta guardou estão em <b>⛪ Da Missa pronta e Terço</b>.` : ""}</p></div>`
+        : `<div class="empty"><h3>Nada encontrado</h3></div>`;
+    return;
+  }
+  let lastGroup = null;
   box.innerHTML = list
     .map((l) => {
+      // nas automáticas, um título para cada Missa / Terço
+      const head = lyWho !== "mine" && isAutoLyric(l) && l.group && l.group !== lastGroup ? `<h3 class="ly-group">${l.auto === "terco" ? "📿" : "⛪"} ${esc(l.group)}</h3>` : "";
+      if (isAutoLyric(l)) lastGroup = l.group;
       const preview = textToSections(l.text).flatMap((s) => s.lines).slice(0, 4).join("\n");
       const meta = [l.mode === "catolica" ? l.moment || "Litúrgica" : "Livre", l.mode === "catolica" ? l.season : "", LYRICS_SOURCE[l.source]].filter(Boolean);
-      return `<article class="lyric-card" data-id="${l.id}">
+      return `${head}<article class="lyric-card" data-id="${l.id}">
         <h4>${esc(l.title)}</h4>
         <div class="lc-meta">${meta.map((m) => `<span>${esc(m)}</span>`).join("")}${extractChords(l.text) ? `<span class="chords">com cifra</span>` : ""}</div>
         <pre>${esc(preview)}</pre>
@@ -2071,7 +2100,7 @@ $$("[data-start]").forEach((b) =>
     goStep(1); // pula a escolha do modo: já foi feita aqui
   }),
 );
-$$("[data-open-settings]").forEach((b) => b.addEventListener("click", () => $("#btn-settings").click()));
+$$("[data-open-settings]").forEach((b) => b.addEventListener("click", () => ($("#btn-settings").click(), ($("#set-server").open = true))));
 $("#search").addEventListener("input", (e) => ((state.filter = e.target.value), renderLibrary()));
 $$("#filter-tabs button").forEach((b) =>
   b.addEventListener("click", () => {
@@ -5197,65 +5226,83 @@ $("#tc-go").onclick = async () => {
   }
 };
 
-// ---------------- Salmo de hoje ----------------
-let psalmInfo = null;
+// ---------------- Salmo de uma data (a pessoa escolhe o dia) ----------------
+let psalmInfo = null, psalmPick = null;
+const brDay = (iso) => iso.split("-").reverse().join("/");
 async function loadPsalm() {
   try {
     psalmInfo = await api("/api/salmo");
   } catch {
     return;
   }
-  const d = psalmInfo.days.find((x) => x.date === psalmInfo.today);
-  const box = $("#psalm-today");
-  box.classList.toggle("hidden", !psalmInfo.enabled && !d);
-  if (!d) {
-    $("#pt-ref").textContent = "";
-    $("#pt-refrain").textContent = psalmInfo.enabled ? "O Salmo de hoje é gravado sozinho de madrugada." : "Gravação automática desligada";
-    $("#pt-status").textContent = psalmInfo.enabled ? "Ainda não foi gravado hoje." : "";
-  } else {
-    $("#pt-ref").textContent = ` · ${d.ref}`;
-    $("#pt-refrain").textContent = d.refrain;
-    $("#pt-status").textContent = d.song ? `${d.title} · ${fmt(d.song.duration || 0)}` : d.pending ? "Sendo gravado agora…" : "Não ficou pronto: grave de novo nas configurações.";
-    if (d.song && !state.songs.some((s) => s.id === d.song.id)) state.songs.unshift(d.song);
-  }
-  $("#pt-play").disabled = $("#pt-share").disabled = !d?.song;
-  $("#pt-play").onclick = () => d?.song && play(d.song);
-  $("#pt-share").onclick = () => d?.song && shareFile(d.song.url, `Salmo ${d.ref}.mp3`, "audio/mpeg", `📖 *Salmo de hoje* (${d.ref})\n\n_${d.refrain}_\n\n${d.title}\nCantado no ACAIAMUSIC`);
-  if (d?.pending) setTimeout(loadPsalm, 60_000);
+  if (!$("#pt-date").value) $("#pt-date").value = todayBR();
+  const pending = psalmInfo.days.filter((d) => d.pending).length;
+  $("#pt-status").textContent = psalmInfo.days.length ? `${psalmInfo.days.length} Salmo(s) gravado(s)${pending ? ` · ${pending} gravando agora…` : ""}` : "";
+  for (const d of psalmInfo.days) if (d.song && !state.songs.some((s) => s.id === d.song.id)) state.songs.unshift(d.song);
+  if (pending) setTimeout(loadPsalm, 60_000);
 }
+function paintPsalmHist() {
+  const days = psalmInfo?.days || [];
+  $("#ps-hist").innerHTML =
+    days.map((d) => `<li><span><b>${esc(brDay(d.date))} · ${esc(d.ref)}</b><small>${esc(d.refrain)}</small></span>${d.song ? `<button class="btn ghost sm" data-id="${d.song.id}" title="Ouvir este Salmo">▶</button><button class="btn wa-btn sm" data-wa="${d.song.id}" title="Enviar este Salmo no WhatsApp">WhatsApp</button>` : `<small>gravando…</small>`}</li>`).join("") ||
+    `<li class="muted small">Nenhum ainda. Escolha a data e toque em Gravar.</li>`;
+}
+function psalmGenres(sel) {
+  $("#ps-genre").innerHTML = GENRES["Católica"].map(([n], i) => `<option value="${i}" ${n === sel ? "selected" : ""}>${esc(n)}</option>`).join("");
+}
+$("#pt-go").onclick = async (e) => {
+  const date = $("#pt-date").value || todayBR();
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "Lendo a liturgia…";
+  try {
+    psalmPick = await api(`/api/salmo/${date}`);
+    $("#ps-title").textContent = `Salmo ${psalmPick.ref} · ${brDay(date)}`;
+    $("#ps-lit").textContent = [psalmPick.title, psalmPick.season].filter(Boolean).join(" · ");
+    $("#ps-refrain").textContent = `℟ ${psalmPick.refrain}`;
+    $("#ps-text").textContent = psalmPick.text;
+    $("#ps-view").classList.remove("hidden");
+    $("#ps-voice").value = psalmInfo?.voice || "Feminina";
+    psalmGenres(psalmInfo?.genre);
+    const done = psalmInfo?.days.find((d) => d.date === date && d.song);
+    $("#ps-rec").textContent = done ? "🎵 Gravar de novo" : "🎵 Gravar este Salmo";
+    paintPsalmHist();
+    $("#psalm-dialog").showModal();
+  } catch (err) {
+    toast(err.message, true, 7000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "📖 Ver o Salmo";
+  }
+};
 $("#pt-cfg").onclick = () => {
-  const p = psalmInfo || {};
-  $("#ps-on").checked = p.enabled !== false;
-  $("#ps-voice").value = p.voice || "Feminina";
-  $("#ps-genre").innerHTML = GENRES["Católica"].map(([n], i) => `<option value="${i}" ${n === p.genre ? "selected" : ""}>${esc(n)}</option>`).join("");
-  $("#ps-hist").innerHTML = (p.days || []).map((d) => `<li><span><b>${esc(d.date.split("-").reverse().join("/"))} · ${esc(d.ref)}</b><small>${esc(d.refrain)}</small></span>${d.song ? `<button class="btn ghost sm" data-id="${d.song.id}">▶</button>` : `<small>${d.pending ? "gravando…" : "—"}</small>`}</li>`).join("") || `<li class="muted small">Nenhum ainda.</li>`;
+  $("#ps-title").textContent = "Salmos gravados";
+  $("#ps-view").classList.add("hidden");
+  paintPsalmHist();
   $("#psalm-dialog").showModal();
 };
 $("#ps-hist").addEventListener("click", (e) => {
-  const id = e.target.closest("[data-id]")?.dataset.id;
-  const d = psalmInfo?.days.find((x) => x.song?.id === id);
-  if (d) play(d.song);
+  const play1 = e.target.closest("[data-id]")?.dataset.id, wa = e.target.closest("[data-wa]")?.dataset.wa;
+  const d = psalmInfo?.days.find((x) => x.song && (x.song.id === play1 || x.song.id === wa));
+  if (!d) return;
+  if (play1) play(d.song);
+  else shareFile(d.song.url, `Salmo ${d.ref}.mp3`, "audio/mpeg", `📖 *Salmo ${d.ref}* (${brDay(d.date)})\n\n_${d.refrain}_\n\n${d.title}\nCantado no ACAIAMUSIC`);
 });
-$("#ps-save").onclick = async () => {
+$("#ps-rec").onclick = async (e) => {
+  if (!psalmPick) return;
   const [gName, gTags] = GENRES["Católica"][$("#ps-genre").value];
+  const btn = e.currentTarget;
+  btn.disabled = true;
   try {
-    await api("/api/salmo", { method: "PUT", body: JSON.stringify({ enabled: $("#ps-on").checked, voice: $("#ps-voice").value, genre: gName, genreTags: gTags }) });
+    const d = await api("/api/salmo/record", { method: "POST", body: JSON.stringify({ date: psalmPick.date, voice: $("#ps-voice").value, genre: gName, genreTags: gTags }) });
     $("#psalm-dialog").close();
-    toast($("#ps-on").checked ? "📖 O Salmo do dia vai ser gravado sozinho toda madrugada." : "Gravação automática do Salmo desligada.");
-    loadPsalm();
-  } catch (e) {
-    toast(e.message, true);
-  }
-};
-$("#ps-now").onclick = async () => {
-  try {
-    const d = await api("/api/salmo/now", { method: "POST" });
-    toast(`📖 Salmo de hoje (${d.ref}) ${d.songId ? "na fila de criação" : ""}`, false, 5000);
-    $("#psalm-dialog").close();
+    toast(`📖 Salmo ${d.ref} de ${brDay(d.date)} entrou na fila de criação. Ele aparece na biblioteca quando ficar pronto.`, false, 6000);
     refreshQueue();
     setTimeout(loadPsalm, 3000);
-  } catch (e) {
-    toast(e.message, true, 7000);
+  } catch (err) {
+    toast(err.message, true, 7000);
+  } finally {
+    btn.disabled = false;
   }
 };
 loadPsalm();
@@ -5268,3 +5315,77 @@ const openLibTab = (tab) => {
 $("#ql-lyrics").onclick = () => openLibTab("lyrics");
 $("#ql-albums").onclick = () => openLibTab("albums");
 $("#ql-queue").onclick = () => $("#lib-queue").click();
+// =========================================================
+// AJUSTES: as preferências do app num lugar só (guardadas no aparelho)
+// =========================================================
+const pref = (k, d) => localStorage.getItem("acaia-" + k) ?? d;
+const setPref = (k, v) => localStorage.setItem("acaia-" + k, v);
+function segPick(sel, value, onPick) {
+  $$(sel + " button").forEach((b) => {
+    b.classList.toggle("on", b.dataset.v === value);
+    b.onclick = () => {
+      $$(sel + " button").forEach((x) => x.classList.toggle("on", x === b));
+      onPick(b.dataset.v);
+    };
+  });
+}
+function paintSettings() {
+  segPick("#set-quality", pref("quality", state.quality || "fast"), (v) => {
+    setPref("quality", v);
+    $(`#quality [data-q="${v}"]`)?.click();
+  });
+  segPick("#set-vstyle", videoStyle, (v) => $(`#video-style [data-s="${v}"]`).click());
+  segPick("#set-vformat", pref("video-format", videoFormat), (v) => {
+    setPref("video-format", v);
+    $(`#video-format [data-v="${v}"]`)?.click();
+  });
+  segPick("#set-inst", pref("chord-inst", chordInst), (v) => {
+    setPref("chord-inst", v);
+    $(`#chord-inst [data-i="${v}"]`)?.click();
+  });
+  const r = myRange();
+  $("#set-range").textContent = r?.low && r?.high ? `${midiName(r.low)} a ${midiName(r.high)}` : "não medida";
+  $("#set-stage-size").textContent = `${Math.round((stage.size || 1) * 100)}%`;
+  $("#set-help").checked = document.body.classList.contains("help-mode");
+  $("#set-author").value = localStorage.getItem("acaia-autor") || "";
+}
+$("#btn-settings").addEventListener("click", paintSettings);
+$("#set-range-go").onclick = () => {
+  paintRange();
+  $("#rg-out").innerHTML = "";
+  $("#rg-calc").classList.toggle("hidden", !dlgSong); // calcular o tom só com uma música aberta
+  $("#range-dialog").showModal();
+  $("#range-dialog").addEventListener("close", paintSettings, { once: true });
+};
+$("#chord-myvoice").addEventListener("click", () => $("#rg-calc").classList.remove("hidden"));
+$("#set-range-clear").onclick = () => (localStorage.removeItem("acaia-voice-range"), paintSettings());
+const stageStep = (d) => {
+  stage.size = Math.max(0.6, Math.min(2, +((stage.size || 1) + d).toFixed(2)));
+  localStorage.setItem("acaia-stage-size", stage.size);
+  paintSettings();
+};
+$("#set-stage-minus").onclick = () => stageStep(-0.15);
+$("#set-stage-plus").onclick = () => stageStep(0.15);
+$("#set-help").onchange = (e) => {
+  if (e.target.checked !== document.body.classList.contains("help-mode")) $("#help-toggle")?.click();
+};
+$("#set-author").onchange = (e) => localStorage.setItem("acaia-autor", e.target.value.trim());
+$("#set-refresh").onclick = async () => {
+  try {
+    for (const k of await caches.keys()) await caches.delete(k);
+    for (const r of (await navigator.serviceWorker?.getRegistrations?.()) || []) await r.update();
+  } catch {}
+  location.reload();
+};
+// aplica as preferências guardadas ao abrir o app
+(() => {
+  const q = pref("quality", "");
+  if (q) $(`#quality [data-q="${q}"]`)?.click();
+  const vf = pref("video-format", "");
+  if (vf) $(`#video-format [data-v="${vf}"]`)?.click();
+  const ci = pref("chord-inst", "");
+  if (ci) $(`#chord-inst [data-i="${ci}"]`)?.click();
+})();
+// "⋯ Mais" da janela da música: fecha ao escolher uma ação ou ao abrir outra música
+$$(".more-panel button").forEach((b) => b.addEventListener("click", () => (b.closest("details").open = false)));
+$("#song-dialog").addEventListener("close", () => ($(".more-actions").open = false));

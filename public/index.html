@@ -32,9 +32,9 @@
         <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>Repertório</span>
       </button>
     </nav>
-    <button class="rail-gear" id="btn-settings" title="Servidor de música">
+    <button class="rail-gear" id="btn-settings" title="Ajustes: criação, vídeo, voz, cifra, ajuda, servidor e app">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
-      <span>Servidor</span>
+      <span>Ajustes</span>
     </button>
     <div class="rail-led" id="status" title="Verificando…"><i></i></div>
   </aside>
@@ -76,24 +76,14 @@
         </div>
       </div>
 
-      <div class="psalm-today hidden" id="psalm-today">
-        <span class="pt-ico">📖</span>
-        <div class="pt-txt"><small>Salmo de hoje<span id="pt-ref"></span></small><b id="pt-refrain"></b><em id="pt-status"></em></div>
-        <div class="pt-act">
-          <button id="pt-play" class="btn primary sm" title="Ouvir o Salmo de hoje, gravado sozinho com o texto exato da liturgia">▶ Ouvir</button>
-          <button id="pt-share" class="btn wa-btn sm" title="Enviar o áudio do Salmo com o refrão no WhatsApp (conversa, grupo ou Status)">WhatsApp</button>
-          <button id="pt-cfg" class="btn ghost sm" title="Ligar ou desligar a gravação automática, escolher voz e estilo, ver os últimos dias e gravar o de hoje agora">⚙</button>
-        </div>
-      </div>
-
       <div class="quick-links">
         <button class="quick" id="ql-lyrics" title="Abre as letras que você salvou (Biblioteca › Minhas letras)">📝 Minhas letras <em id="ql-lyrics-n"></em></button>
         <button class="quick" id="ql-albums" title="Abre os seus álbuns (Biblioteca › Álbuns)">📀 Álbuns</button>
         <button class="quick" id="ql-queue" title="Mostra a fila de criação: o que está sendo gravado agora">🎵 Fila de criação</button>
       </div>
 
-      <h2 class="section-title">O que você quer criar hoje?</h2>
-      <div class="actions">
+      <h2 class="section-title home-group"><span>⛪</span> Para a Missa e a oração</h2>
+      <div class="actions actions-3">
         <button class="action-card mass-card" id="mass-open">
           <span class="mc-rays" aria-hidden="true"></span>
           <span class="ac-icon ac-mass"><svg viewBox="0 0 24 24"><path d="M7 3h10c0 4-2 7-5 7S7 7 7 3zM12 10v7M8 21h8M10 17h4"/><path d="M12 1v1M4.5 4l.8.6M19.5 4l-.8.6"/></svg></span>
@@ -108,10 +98,35 @@
           <small>Escolha o momento da celebração e o tempo litúrgico. A IA compõe com base na liturgia.</small>
           <span class="ac-go">Começar →</span>
         </button>
+        <button class="action-card" id="terco-open" title="Os 5 mistérios do dia, cada um com um canto curto para cantar entre as dezenas; vira um repertório">
+          <span class="ac-icon ac-1"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="M12 15v6M9.5 18.5h5"/></svg></span>
+          <b>📿 Terço cantado</b>
+          <small>Os mistérios do dia com um canto curto para cada um, para rezar cantando.</small>
+          <span class="ac-go">Montar o terço →</span>
+        </button>
+      </div>
+      <div class="psalm-today" id="psalm-today">
+        <span class="pt-ico">📖</span>
+        <div class="pt-txt"><small>Salmo de um dia<span id="pt-ref"></span></small><b id="pt-refrain">Escolha a data e grave o Salmo da liturgia, com o texto exato.</b><em id="pt-status"></em></div>
+        <div class="pt-act">
+          <input type="date" id="pt-date" title="A data da liturgia: o app pega o Salmo deste dia" />
+          <button id="pt-go" class="btn primary sm" title="Mostra o Salmo da data escolhida para você conferir e gravar">📖 Ver o Salmo</button>
+          <button id="pt-cfg" class="btn ghost sm" title="Os Salmos já gravados, para ouvir e enviar no WhatsApp">🗂️ Gravados</button>
+        </div>
+      </div>
+
+      <h2 class="section-title home-group"><span>🎵</span> Outras criações</h2>
+      <div class="actions actions-3">
         <button class="action-card" data-start="livre">
           <span class="ac-icon ac-2"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
           <b>Música livre</b>
           <small>Aniversário, declaração, jingle, louvor… qualquer estilo, com letra e voz.</small>
+          <span class="ac-go">Começar →</span>
+        </button>
+        <button class="action-card" data-start="own">
+          <span class="ac-icon ac-3"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></span>
+          <b>Tenho a letra (e a cifra)</b>
+          <small>Cole a sua letra, com ou sem acordes, e a IA cria só a música no seu tom.</small>
           <span class="ac-go">Começar →</span>
         </button>
         <button class="action-card" id="tribute-open" title="Conte a história de alguém e a ocasião: a IA compõe e grava uma canção com o nome e a história da pessoa">
@@ -119,18 +134,6 @@
           <b>💝 Música para alguém</b>
           <small>Batizado, aniversário, bodas, 15 anos, saudade… uma canção com o nome e a história da pessoa.</small>
           <span class="ac-go">Homenagear →</span>
-        </button>
-        <button class="action-card" id="terco-open" title="Os 5 mistérios do dia, cada um com um canto curto para cantar entre as dezenas; vira um repertório">
-          <span class="ac-icon ac-1"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="M12 15v6M9.5 18.5h5"/></svg></span>
-          <b>📿 Terço cantado</b>
-          <small>Os mistérios do dia com um canto curto para cada um, para rezar cantando.</small>
-          <span class="ac-go">Montar o terço →</span>
-        </button>
-        <button class="action-card" data-start="own">
-          <span class="ac-icon ac-3"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></span>
-          <b>Tenho a letra (e a cifra)</b>
-          <small>Cole a sua letra, com ou sem acordes, e a IA cria só a música no seu tom.</small>
-          <span class="ac-go">Começar →</span>
         </button>
       </div>
 
@@ -466,6 +469,11 @@
         <button data-l="albums">📀 Álbuns <em id="alb-count"></em></button>
         <button data-l="lyrics">Minhas letras <em id="lyr-count"></em></button>
       </div>
+      <div class="segmented ly-who hidden" id="ly-who">
+        <button class="on" data-w="mine" title="As letras que você salvou (no estúdio, na janela da música ou escritas por você)">✍️ Salvas por você <em id="ly-n-mine"></em></button>
+        <button data-w="auto" title="As letras que a Missa pronta e o Terço cantado guardaram sozinhos">⛪ Da Missa pronta e Terço <em id="ly-n-auto"></em></button>
+        <button data-w="all" title="Todas as letras">Todas</button>
+      </div>
       <div class="lib-tools hidden" id="lyr-tools">
         <div class="lib-selects">
           <select id="ly-moment" aria-label="Filtrar por momento" data-filter></select>
@@ -651,12 +659,19 @@
           <button id="dlg-stage" class="btn ghost" title="Tela cheia para tocar ao vivo: letra e cifra rolando no tempo da música, com a batida do teclado">🎤 Modo palco</button>
           <button id="dlg-fav" class="btn ghost">♡ Favoritar</button>
           <a id="dlg-download" class="btn ghost" download>⬇ MP3</a>
-          <button id="dlg-variant" class="btn ghost" title="A mesma música só com violão, só com piano ou ao vivo na igreja (a original continua)">🎸 Outras versões</button>
-          <button id="dlg-redo" class="btn ghost" title="Grava de novo do mesmo jeito; o Whisper confere a pronúncia e fica a gravação mais clara">🎯 Refazer</button>
-          <button id="dlg-reuse" class="btn ghost">✎ Nova versão</button>
-          <button id="dlg-album" class="btn ghost">📀 Álbum</button>
-          <button id="dlg-registro" class="btn ghost" title="Documento com letra, cifra, impressão digital do áudio, autoria e declaração de IA, com carimbo de tempo gratuito">📜 Registro</button>
-          <button id="dlg-delete" class="btn ghost danger">Excluir</button>
+          <details class="more-actions">
+            <summary class="btn ghost" title="Mais ações: outras versões, refazer, álbum, registro, excluir">⋯ Mais</summary>
+            <div class="more-panel">
+              <p class="more-h">Criar a partir desta</p>
+              <button id="dlg-variant" class="btn ghost" title="A mesma música só com violão, só com piano ou ao vivo na igreja (a original continua)">🎸 Outras versões</button>
+              <button id="dlg-redo" class="btn ghost" title="Grava de novo do mesmo jeito; o Whisper confere a pronúncia e fica a gravação mais clara">🎯 Refazer</button>
+              <button id="dlg-reuse" class="btn ghost">✎ Nova versão</button>
+              <p class="more-h">Organizar</p>
+              <button id="dlg-album" class="btn ghost">📀 Álbum</button>
+              <button id="dlg-registro" class="btn ghost" title="Documento com letra, cifra, impressão digital do áudio, autoria e declaração de IA, com carimbo de tempo gratuito">📜 Registro</button>
+              <button id="dlg-delete" class="btn ghost danger">Excluir</button>
+            </div>
+          </details>
         </div>
         <div id="dlg-versions" class="versions hidden"></div>
       </div>
@@ -1062,22 +1077,22 @@
     </div>
   </dialog>
 
-  <!-- ============ SALMO DO DIA ============ -->
+  <!-- ============ SALMO DE UMA DATA ============ -->
   <dialog id="psalm-dialog" class="settings">
     <button class="close" aria-label="Fechar" title="Fechar" onclick="this.closest('dialog').close()">✕</button>
-    <span class="eyebrow">📖 Salmo do dia</span>
-    <h2>Gravação automática</h2>
-    <p class="muted small">Toda madrugada o app grava o Salmo da liturgia do dia, com o texto exato, e deixa pronto na tela inicial para ouvir e mandar no WhatsApp.</p>
-    <label class="check"><input type="checkbox" id="ps-on" /> <span><b>Gravar o Salmo do dia sozinho</b> · usa os créditos grátis do estúdio (1 música por dia)</span></label>
-    <div class="field-row">
-      <div class="field"><label for="ps-voice">Voz</label><select id="ps-voice"><option>Feminina</option><option>Masculina</option><option>Dueto</option><option>Coral</option></select></div>
-      <div class="field"><label for="ps-genre">Estilo</label><select id="ps-genre"></select></div>
+    <span class="eyebrow">📖 Salmo de um dia</span>
+    <h2 id="ps-title">Salmo</h2>
+    <div id="ps-view">
+      <p class="muted small" id="ps-lit"></p>
+      <p class="ps-refrain" id="ps-refrain"></p>
+      <pre class="ps-text" id="ps-text"></pre>
+      <div class="field-row">
+        <div class="field"><label for="ps-voice">Voz</label><select id="ps-voice"><option>Feminina</option><option>Masculina</option><option>Dueto</option><option>Coral</option></select></div>
+        <div class="field"><label for="ps-genre">Estilo</label><select id="ps-genre"></select></div>
+      </div>
+      <div class="pane-actions"><button class="btn primary" id="ps-rec" title="Grava este Salmo com o texto exato da liturgia (entra na fila de criação)">🎵 Gravar este Salmo</button></div>
     </div>
-    <div class="pane-actions">
-      <button class="btn primary" id="ps-save" title="Salva as escolhas da gravação automática">Salvar</button>
-      <button class="btn ghost" id="ps-now" title="Grava o Salmo de hoje agora, sem esperar a madrugada">📖 Gravar o de hoje agora</button>
-    </div>
-    <p class="sub-label">Últimos dias</p>
+    <p class="sub-label">Salmos já gravados</p>
     <ul class="ps-hist" id="ps-hist"></ul>
   </dialog>
 
@@ -1192,48 +1207,101 @@
   </dialog>
 
   <!-- ============ SERVIDOR DE MÚSICA (Kaggle) ============ -->
-  <dialog id="settings-dialog" class="settings">
-    <button class="close" aria-label="Fechar" onclick="this.closest('dialog').close()">✕</button>
+  <dialog id="settings-dialog" class="settings settings-all">
+    <button class="close" aria-label="Fechar" title="Fechar os ajustes" onclick="this.closest('dialog').close()">✕</button>
     <span class="eyebrow">Configurações</span>
-    <h2>⚙️ Servidor de música</h2>
+    <h2>⚙️ Ajustes</h2>
+    <p class="muted small">Tudo o que dá para ajustar no app, num lugar só. As escolhas ficam guardadas neste aparelho.</p>
+
+    <details class="set-sec" open>
+      <summary>🎵 Criação de músicas</summary>
+      <div class="set-row"><span><b>Qualidade da gravação</b><small>Rápida fica pronta antes; alta tem mais detalhe no som.</small></span>
+        <div class="segmented mini-seg" id="set-quality"><button data-v="fast" title="Grava mais rápido">⚡ Rápida</button><button data-v="high" title="Mais detalhe no som, demora um pouco mais">💎 Alta</button></div></div>
+      <div class="set-row"><span><b>Revisão de pronúncia</b><small>O Whisper ouve a música antes de salvar e grava de novo se a letra não ficou clara.</small></span><span class="set-note">sempre ligada</span></div>
+    </details>
+
+    <details class="set-sec">
+      <summary>🎬 Vídeo para o Status</summary>
+      <div class="set-row"><span><b>Estilo padrão</b><small>Como o vídeo começa quando você abre a aba Vídeo.</small></span>
+        <div class="segmented mini-seg" id="set-vstyle"><button data-v="historia" title="Cenas animadas que contam a letra">🎬 História</button><button data-v="classico" title="Capa, título, refrão e equalizador">🖼️ Clássico</button></div></div>
+      <div class="set-row"><span><b>Formato padrão</b><small>Em pé para Status/Reels; deitado para YouTube.</small></span>
+        <div class="segmented mini-seg" id="set-vformat"><button data-v="vertical" title="9:16, em pé">▯ Em pé</button><button data-v="horizontal" title="16:9, deitado">▭ Deitado</button></div></div>
+    </details>
+
+    <details class="set-sec">
+      <summary>🎤 Minha voz</summary>
+      <div class="set-row"><span><b>Minha extensão</b><small>A nota mais grave e a mais aguda que você canta com conforto. Usada em “Tom para a minha voz”.</small></span><b class="set-val" id="set-range">—</b></div>
+      <div class="pane-actions"><button class="btn ghost sm" id="set-range-go" title="Grava a sua nota mais grave e a mais aguda">🎤 Medir a minha voz</button><button class="btn ghost sm" id="set-range-clear" title="Apaga a extensão guardada">Apagar</button></div>
+    </details>
+
+    <details class="set-sec">
+      <summary>🎸 Cifra e palco</summary>
+      <div class="set-row"><span><b>Instrumento da cifra</b><small>Os desenhos dos acordes aparecem para este instrumento.</small></span>
+        <div class="segmented mini-seg" id="set-inst"><button data-v="violao" title="Acordes no violão">🎸 Violão</button><button data-v="teclado" title="Acordes no teclado">🎹 Teclado</button></div></div>
+      <div class="set-row"><span><b>Tamanho da letra no modo palco</b><small>Também dá para mudar com A− e A+ dentro do palco.</small></span>
+        <div class="set-steps"><button class="btn ghost sm" id="set-stage-minus" title="Letra menor">A−</button><b class="set-val" id="set-stage-size">100%</b><button class="btn ghost sm" id="set-stage-plus" title="Letra maior">A+</button></div></div>
+    </details>
+
+    <details class="set-sec">
+      <summary>❓ Ajuda</summary>
+      <div class="set-row"><span><b>Modo ajuda</b><small>Ligado, tocar num botão só explica o que ele faz (o X das janelas continua fechando).</small></span>
+        <label class="switch"><input type="checkbox" id="set-help" /><i></i></label></div>
+      <div class="set-row"><span><b>Explicação dos botões</b><small>Segure qualquer botão (ou pare o mouse em cima) para ler o que ele faz.</small></span><span class="set-note">sempre ativa</span></div>
+    </details>
+
+    <details class="set-sec">
+      <summary>📜 Registro de autoria</summary>
+      <div class="set-row"><span><b>Nome do autor</b><small>Vai no documento de registro das suas músicas.</small></span>
+        <input type="text" id="set-author" maxlength="80" placeholder="Seu nome completo" /></div>
+    </details>
+
+    <details class="set-sec" id="set-server">
+      <summary>🖥️ Servidor de música</summary>
     <div class="srv-status" id="srv-status"><i></i><span>Verificando…</span></div>
 
-    <div class="srv-card hidden" id="auto-card">
-      <h4>⚡ Estúdio automático no Kaggle <small id="auto-user"></small></h4>
-      <p class="muted small">O app liga o estúdio sozinho quando você cria uma música, sem abrir o notebook. Leva uns 4 min para ligar e ele se desliga depois de 30 min sem uso, para economizar suas 30 h grátis da semana.</p>
-      <p class="small" id="auto-phase"></p>
-      <div class="quota hidden" id="kg-quota"></div>
-      <div class="pane-actions">
-        <button class="btn primary" id="auto-start">Ligar agora</button>
-        <button class="btn ghost" id="auto-stop">Desligar</button>
+      <div class="srv-card hidden" id="auto-card">
+        <h4>⚡ Estúdio automático no Kaggle <small id="auto-user"></small></h4>
+        <p class="muted small">O app liga o estúdio sozinho quando você cria uma música, sem abrir o notebook. Leva uns 4 min para ligar e ele se desliga depois de 30 min sem uso, para economizar suas 30 h grátis da semana.</p>
+        <p class="small" id="auto-phase"></p>
+        <div class="quota hidden" id="kg-quota"></div>
+        <div class="pane-actions">
+          <button class="btn primary" id="auto-start">Ligar agora</button>
+          <button class="btn ghost" id="auto-stop">Desligar</button>
+        </div>
       </div>
-    </div>
 
-    <div class="srv-card">
-      <h4>🚀 Seu estúdio grátis no Kaggle <small>conexão atual</small></h4>
-      <details class="manual"><summary>Modo manual (avançado): ligar o notebook você mesma</summary>
-      <ol class="srv-steps">
-        <li>Crie uma conta grátis em <a href="https://www.kaggle.com/account/login?phase=startRegisterTab" target="_blank" rel="noopener">kaggle.com</a> e verifique seu telefone (Settings → Phone verification). Isso libera GPU e internet.</li>
-        <li><a href="/kaggle/acaiamusic-estudio.ipynb" download><b>⬇ Baixe o notebook do estúdio</b></a>.</li>
-        <li>No Kaggle: <b>Create → New Notebook → File → Import Notebook</b> e escolha o arquivo baixado.</li>
-        <li>No painel da direita: <b>Accelerator → GPU T4 x2</b> e <b>Internet → On</b>.</li>
-        <li>Clique em <b>Run All</b>. Na primeira vez leva uns 10–15 min. No final aparece o <b>endereço</b> e a <b>chave</b>: cole aqui embaixo.</li>
-      </ol>
-      </details>
-      <div class="field">
-        <label for="kg-url">Endereço do estúdio</label>
-        <input id="kg-url" type="text" inputmode="url" autocomplete="off" placeholder="https://algo-aleatorio.trycloudflare.com" />
+      <div class="srv-card">
+        <h4>🚀 Seu estúdio grátis no Kaggle <small>conexão atual</small></h4>
+        <details class="manual"><summary>Modo manual (avançado): ligar o notebook você mesma</summary>
+        <ol class="srv-steps">
+          <li>Crie uma conta grátis em <a href="https://www.kaggle.com/account/login?phase=startRegisterTab" target="_blank" rel="noopener">kaggle.com</a> e verifique seu telefone (Settings → Phone verification). Isso libera GPU e internet.</li>
+          <li><a href="/kaggle/acaiamusic-estudio.ipynb" download><b>⬇ Baixe o notebook do estúdio</b></a>.</li>
+          <li>No Kaggle: <b>Create → New Notebook → File → Import Notebook</b> e escolha o arquivo baixado.</li>
+          <li>No painel da direita: <b>Accelerator → GPU T4 x2</b> e <b>Internet → On</b>.</li>
+          <li>Clique em <b>Run All</b>. Na primeira vez leva uns 10–15 min. No final aparece o <b>endereço</b> e a <b>chave</b>: cole aqui embaixo.</li>
+        </ol>
+        </details>
+        <div class="field">
+          <label for="kg-url">Endereço do estúdio</label>
+          <input id="kg-url" type="text" inputmode="url" autocomplete="off" placeholder="https://algo-aleatorio.trycloudflare.com" />
+        </div>
+        <div class="field">
+          <label for="kg-key">Chave <small id="kg-key-hint"></small></label>
+          <input id="kg-key" type="text" autocomplete="off" placeholder="cole a chave mostrada no Kaggle" />
+        </div>
+        <div class="pane-actions">
+          <button class="btn primary" id="kg-save">Testar e conectar</button>
+          <button class="btn ghost" id="kg-clear">Desconectar</button>
+        </div>
+        <p class="muted small">O Kaggle dá <b>30 horas de GPU por semana</b> grátis (sessões de até 12 h). Deixe a aba do notebook aberta enquanto cria músicas e clique em <b>Stop session</b> quando terminar. Cada vez que você liga o notebook, o endereço e a chave mudam: é só colar de novo. Se o estúdio estiver desligado, o app usa automaticamente os servidores gratuitos do Hugging Face.</p>
       </div>
-      <div class="field">
-        <label for="kg-key">Chave <small id="kg-key-hint"></small></label>
-        <input id="kg-key" type="text" autocomplete="off" placeholder="cole a chave mostrada no Kaggle" />
-      </div>
-      <div class="pane-actions">
-        <button class="btn primary" id="kg-save">Testar e conectar</button>
-        <button class="btn ghost" id="kg-clear">Desconectar</button>
-      </div>
-      <p class="muted small">O Kaggle dá <b>30 horas de GPU por semana</b> grátis (sessões de até 12 h). Deixe a aba do notebook aberta enquanto cria músicas e clique em <b>Stop session</b> quando terminar. Cada vez que você liga o notebook, o endereço e a chave mudam: é só colar de novo. Se o estúdio estiver desligado, o app usa automaticamente os servidores gratuitos do Hugging Face.</p>
-    </div>
+    </details>
+
+    <details class="set-sec">
+      <summary>📱 Aplicativo</summary>
+      <div class="set-row"><span><b>Atualizar o app</b><small>Busca a versão mais nova (use se algo parecer antigo ou travado).</small></span>
+        <button class="btn ghost sm" id="set-refresh" title="Apaga a cópia guardada no aparelho e abre a versão mais nova">↻ Atualizar</button></div>
+    </details>
   </dialog>
 
   <!-- ============ MODO PROJEÇÃO ============ -->
