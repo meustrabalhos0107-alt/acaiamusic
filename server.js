@@ -385,6 +385,8 @@ async function runJob(id, { plan, duration, language, meta, options, reference, 
   };
   const softSet = (patch) => !job.canceled && job.attempt === attempt && Object.assign(job, stamp(patch), { updatedAt: Date.now() }); // não interrompe a ligação do estúdio
   job.startedAt = startedAt;
+  job.eta = Math.round(30 + (Number(duration) || 60) * (options.quality === "high" ? 2 : 1.2));
+  job.pctMax = 0; // nova tentativa: o andamento recomeça
   try {
     set({ status: "connecting", message: "Conectando ao estúdio de IA…" });
     // A letra precisa caber no tempo: cantando com calma são ~2,5 sílabas por segundo, mais
@@ -656,14 +658,14 @@ const queuePaused = () => Boolean(getSettings().queuePaused);
 
 function enqueueSong(id, input, extra = {}) {
   queue.push({ id, input, tries: 0, notBefore: 0, addedAt: Date.now(), ...extra });
-  jobs.set(id, { status: "queued", message: queue.length > 1 ? `Na fila de criação: ${queue.length - 1} música(s) antes desta` : "Aguardando…", createdAt: Date.now() });
+  jobs.set(id, { isSong: true, status: "queued", message: queue.length > 1 ? `Na fila de criação: ${queue.length - 1} música(s) antes desta` : "Aguardando…", createdAt: Date.now() });
   saveQueue();
   pump();
 }
 function markQueued() {
   queue.forEach((q, k) => {
     if (q === currentTask) return;
-    const j = jobs.get(q.id) || jobs.set(q.id, { status: "queued", createdAt: Date.now() }).get(q.id);
+    const j = jobs.get(q.id) || jobs.set(q.id, { isSong: true, status: "queued", createdAt: Date.now() }).get(q.id);
     if (j.status !== "queued" || q.notBefore > Date.now()) return;
     Object.assign(j, { message: `Na fila de criação: ${k} música(s) antes desta`, updatedAt: Date.now() });
   });
@@ -681,7 +683,7 @@ async function pump() {
       }
       currentTask = t;
       markQueued();
-      if (!jobs.has(t.id)) jobs.set(t.id, { status: "waiting", message: "Retomando…", createdAt: Date.now() });
+      if (!jobs.has(t.id)) jobs.set(t.id, { isSong: true, status: "waiting", message: "Retomando…", createdAt: Date.now() });
       t.tries++;
       saveQueue();
       const run = chain.then(() => runJob(t.id, t.input));
@@ -743,6 +745,24 @@ async function pump() {
     currentTask = null;
   }
 }
+// Andamento de uma música em % (só sobe, nunca volta para trás na mesma tentativa)
+function songPct(j) {
+  if (!j) return 0;
+  if (j.status === "done") return 100;
+  if (!j.startedAt || ["error", "canceled"].includes(j.status)) return j.pctMax || 0;
+  const el = (Date.now() - (j.stageAt || j.startedAt)) / 1000;
+  const eta = j.eta || 150;
+  let p;
+  if (j.status === "waiting" || j.status === "connecting") p = 2 + 14 * Math.min(1, el / 180); // ligar o estúdio: 2 a 5 min
+  else if (j.status === "queued") p = 16 + 2 * Math.min(1, el / 120);
+  else if (j.status === "generating") {
+    const r = el / eta;
+    p = r < 1 ? 18 + 67 * r : 85 + 8 * (1 - Math.exp(-(r - 1))); // passou do previsto: vai devagar até 93
+  } else if (j.status === "saving") p = 94 + 4 * Math.min(1, el / 30);
+  else p = 1;
+  j.pctMax = Math.max(j.pctMax || 0, Math.min(99, Math.floor(p)));
+  return j.pctMax;
+}
 const queueView = () => {
   const cur = currentTask && jobs.get(currentTask.id);
   const paused = queuePaused();
@@ -764,6 +784,7 @@ const queueView = () => {
         tries: q.tries,
         maxTries: MAX_TRIES,
         retryAt: !running && q.notBefore > Date.now() ? q.notBefore : 0,
+        progress: running ? songPct(j) : 0,
       };
     }),
     history,
@@ -1040,6 +1061,7 @@ app.post("/api/songs/:id/redo", async (req, res) => {
 app.get("/api/jobs/:id", (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ error: "Trabalho não encontrado." });
+  if (job.isSong) job.progress = songPct(job);
   res.json(job);
 });
 
@@ -1277,6 +1299,7 @@ async function recordItems(setlistId, todo, b, set, job, idea) {
   for (;;) {
     await sleep(3000);
     let finished = 0;
+    let partial = 0;
     let msg = "";
     for (const [n, { sid, t }] of tasks.entries()) {
       const sj = jobs.get(sid);
@@ -1288,9 +1311,10 @@ async function recordItems(setlistId, todo, b, set, job, idea) {
       if (k >= 0) job.items[k] = next;
       else job.items.push(next);
       if (sj?.status === "done" || sj?.status === "error" || sj?.status === "canceled") finished++;
-      else if (!msg && sj && sj.status !== "queued") msg = `${t.moment} (${n + 1}/${tasks.length}) · ${sj.message}`;
+      else partial += songPct(sj) / 100;
+      if (sj?.status !== "done" && sj?.status !== "error" && sj?.status !== "canceled" && !msg && sj && sj.status !== "queued") msg = `${t.moment} (${n + 1}/${tasks.length}) · ${sj.message}`;
     }
-    set({ step: base + finished, message: msg || `Na fila de criação · ${finished}/${tasks.length} prontas` });
+    set({ step: base + finished, progress: Math.min(99, Math.floor(((base + finished + partial) / (job.total || tasks.length)) * 100)), message: msg || `Na fila de criação · ${finished}/${tasks.length} prontas` });
     if (finished === tasks.length) break;
   }
 }
@@ -1319,7 +1343,7 @@ app.post("/api/setlists/:id/record", async (req, res) => {
   try {
     await recordItems(sl.id, todo, { ...b, season: sl.season, occasion: sl.title, duration: Math.max(MIN_SECONDS, Math.min(240, Number(b.duration) || 120)) }, set, job, `Repertório · ${sl.title}`);
     const ok = job.items.filter((x) => x.kind === "song").length;
-    set({ status: "done", message: ok === todo.length ? "Músicas gravadas!" : `${ok} de ${todo.length} músicas gravadas.` });
+    set({ status: "done", progress: 100, message: ok === todo.length ? "Músicas gravadas!" : `${ok} de ${todo.length} músicas gravadas.` });
   } catch (e) {
     set({ status: "error", error: e?.message || "Não consegui gravar." });
   }
@@ -1361,7 +1385,7 @@ app.post("/api/mass-ready", async (req, res) => {
     const plans = [];
     // 1) letras, uma por momento (o compositor gratuito pede pausas: espera e tenta de novo)
     for (const [i, p] of plan.entries()) {
-      set({ step: job.step + 1, message: `Compondo a letra · ${p.moment}` });
+      set({ step: job.step + 1, progress: Math.floor((i / job.total) * 100), message: `Compondo a letra · ${p.moment}` });
       const o = { ...options(p.moment), reading: p.reading };
       let lyr = p.fixed ? cleanPlan(p.fixed, false) : null;
       for (let t = 0; t < 4 && !lyr; t++) {
@@ -1387,7 +1411,7 @@ app.post("/api/mass-ready", async (req, res) => {
       const todo = plan.map((p, i) => ({ i, moment: p.moment, plan: plans[i] }));
       await recordItems(setlist.id, todo, { ...b, duration, occasion: lit.title, season: lit.season }, set, job, `Missa pronta · ${lit.title}`);
     }
-    set({ status: "done", message: "Missa pronta!" });
+    set({ status: "done", progress: 100, message: "Missa pronta!" });
   } catch (e) {
     console.error("Missa pronta:", e?.message || e);
     set({ status: "error", error: e?.message || "Não consegui montar a Missa." });

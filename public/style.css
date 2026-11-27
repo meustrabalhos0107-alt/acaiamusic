@@ -1206,3 +1206,10 @@ dialog { max-width: calc(100vw - 16px); }
 @media (max-width: 380px) {
   .library { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Andamento em % */
+.session-pct { margin-left: auto; font-family: var(--mono); font-size: 1.6rem; font-weight: 800; color: #f9a8d4; padding: 4px 6px; }
+.session-pct + .session-time { margin-left: 0; }
+.qd-pct { flex: none; margin-left: auto; font-family: var(--mono); font-size: 0.8rem; color: #f9a8d4; }
+.qd-bar { max-width: none; height: 5px; margin: 6px 0 0; }
+@media (max-width: 520px) { .session-pct, .session-time { font-size: 1.15rem; } }

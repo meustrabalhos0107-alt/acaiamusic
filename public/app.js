@@ -834,6 +834,8 @@ $("#song-title").addEventListener("input", (e) => {
 // =========================================================
 // GRAVAÇÃO
 // =========================================================
+// Andamento em % na frente da mensagem: "42% · Compondo e gravando…"
+const pctMsg = (pct, msg) => `${Math.max(0, Math.min(100, Math.floor(pct)))}% · ${msg || "Trabalhando…"}`;
 const PHASES = { waiting: 4, connecting: 8, queued: 12, generating: 18, saving: 94, done: 100 };
 function sessionProgress(pct) {
   $$("#lanes .lane-track i").forEach((i, n) => (i.style.width = Math.max(0, Math.min(100, pct - n * 3)) + "%"));
@@ -865,6 +867,7 @@ $("#btn-song").onclick = async () => {
   $("#session").classList.remove("hidden");
   $("#progress-title").textContent = title;
   sessionProgress(3);
+  $("#progress-pct").textContent = "0%";
   const t0 = Date.now();
   const eta = Math.round(30 + duration * (options.quality === "high" ? 2 : 1.2));
   const clock = setInterval(() => {
@@ -891,9 +894,11 @@ $("#btn-song").onclick = async () => {
         job = await api(`/api/jobs/${jobId}`);
       }
       if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
-      $("#progress-text").textContent = job.message || "Trabalhando…";
       const target = PHASES[job.status] ?? pct;
-      pct = job.status === "generating" ? Math.min(92, Math.max(target, 18 + ((Date.now() - t0) / 1000 / eta) * 74)) : Math.max(pct, target);
+      pct = job.progress != null ? job.progress : job.status === "generating" ? Math.min(92, Math.max(target, 18 + ((Date.now() - t0) / 1000 / eta) * 74)) : Math.max(pct, target);
+      if (job.status === "done") pct = 100;
+      $("#progress-text").textContent = pctMsg(pct, job.message);
+      $("#progress-pct").textContent = `${Math.floor(pct)}%`;
       sessionProgress(pct);
       if (job.status === "done") {
         state.songs.unshift(job.song);
@@ -1648,9 +1653,10 @@ $("#sl-rec-go").onclick = async () => {
     for (;;) {
       await sleep(3000);
       const j = await api(`/api/jobs/${jobId}`);
-      $("#sl-rec-msg").textContent = j.status === "error" ? `⚠️ ${j.error}` : j.message;
       const done = (j.items || []).filter((x) => x.kind === "song" || x.error).length;
-      $("#sl-rec-bar").style.width = Math.max(4, Math.round((done / (j.total || 1)) * 100)) + "%";
+      const slPct = j.status === "done" ? 100 : j.progress != null ? j.progress : Math.round((done / (j.total || 1)) * 100);
+      $("#sl-rec-msg").textContent = j.status === "error" ? `⚠️ ${j.error}` : pctMsg(slPct, j.message);
+      $("#sl-rec-bar").style.width = Math.max(4, slPct) + "%";
       if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Música cancelada.");
       if (j.status === "done") {
         await Promise.all([loadSongs(), loadSetlists()]);
@@ -2221,8 +2227,9 @@ $("#ed-apply").onclick = async (ev) => {
       await sleep(1200);
       const job = await api(`/api/jobs/${jobId}`);
       if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
-      $("#ed-msg").textContent = job.message;
-      $("#ed-bar").style.width = (job.status === "done" ? 100 : Math.min(90, 15 + ((Date.now() - t0) / 1000) * 6)) + "%";
+      const edPct = job.status === "done" ? 100 : job.progress != null ? job.progress : Math.min(90, 15 + ((Date.now() - t0) / 1000) * 6);
+      $("#ed-msg").textContent = pctMsg(edPct, job.message);
+      $("#ed-bar").style.width = edPct + "%";
       if (job.status === "done") {
         state.songs.unshift(job.song);
         updateCount();
@@ -2837,8 +2844,9 @@ $("#kk-mix").onclick = async (e) => {
       await sleep(1500);
       const j = await api(`/api/jobs/${jobId}`);
       if (j.status === "error" || j.status === "canceled") throw new Error(j.error || "Música cancelada.");
-      $("#kk-msg").textContent = j.message;
-      $("#kk-bar").style.width = (j.status === "done" ? 100 : Math.min(92, 12 + ((Date.now() - t0) / 1000 / 30) * 80)) + "%";
+      const kkPct = j.status === "done" ? 100 : j.progress != null ? j.progress : Math.min(92, 12 + ((Date.now() - t0) / 1000 / 30) * 80);
+      $("#kk-msg").textContent = pctMsg(kkPct, j.message);
+      $("#kk-bar").style.width = kkPct + "%";
       if (j.status === "done") {
         state.songs.unshift(j.song);
         updateCount();
@@ -2924,7 +2932,7 @@ $("#btn-stems").onclick = async (e) => {
       const pct = job.status === "done" ? 100 : Math.min(95, ((Date.now() - t0) / 1000 / eta) * 100);
       if (dlgSong?.id === song.id) {
         $("#stem-bar").style.width = pct + "%";
-        $("#stem-msg").textContent = `${job.message} · ${fmt((Date.now() - t0) / 1000)}`;
+        $("#stem-msg").textContent = `${pctMsg(pct, job.message)} · ${fmt((Date.now() - t0) / 1000)}`;
       }
       if (job.status === "done") {
         song.stems = job.song.stems;
@@ -3264,8 +3272,9 @@ $("#btn-video").onclick = async (e) => {
       await sleep(1500);
       const job = await api(`/api/jobs/${jobId}`);
       if (job.status === "error" || job.status === "canceled") throw new Error(job.error || "Música cancelada.");
-      $("#video-msg").textContent = `${job.message} · ${fmt((Date.now() - t0) / 1000)}`;
-      $("#video-bar").style.width = (job.status === "done" ? 100 : job.progress != null ? 8 + job.progress * 0.9 : Math.min(30, 5 + (Date.now() - t0) / 4000)) + "%";
+      const vPct = job.status === "done" ? 100 : job.progress != null ? 8 + job.progress * 0.9 : Math.min(30, 5 + (Date.now() - t0) / 4000);
+      $("#video-msg").textContent = `${pctMsg(vPct, String(job.message || "").replace(/\s*\d+%$/, ""))} · ${fmt((Date.now() - t0) / 1000)}`;
+      $("#video-bar").style.width = vPct + "%";
       if (job.status === "done") {
         song.lastVideo = job.url;
         if (dlgSong?.id === song.id) {
@@ -3717,7 +3726,7 @@ function renderQueue(q) {
       : (() => {
           const run = q.items?.find((i) => i.running);
           const st = run ? `${Q_STAGES[qStage(run.status)].label}${run.stageAt ? " " + mmss(Date.now() - run.stageAt) : ""}` : "";
-          return `🎵 ${q.pending > 1 ? `${q.pending} músicas · ` : ""}${st || "Na fila"}${q.current ? ` · ${q.current.label}` : ""}`;
+          return `🎵 ${run ? `${run.progress || 0}% · ` : ""}${q.pending > 1 ? `${q.pending} músicas · ` : ""}${st || "Na fila"}${q.current ? ` · ${q.current.label}` : ""}`;
         })();
     pill.title = `${q.current?.message || "Na fila"}\nToque para pausar, cancelar ou ver a fila.`;
   }
@@ -3732,7 +3741,7 @@ function renderQueue(q) {
           const tries = it.tries > 1 || it.retryAt ? ` · tentativa ${Math.min(it.tries + (it.running ? 0 : 1), it.maxTries)} de ${it.maxTries}` : "";
           return `<li class="${it.running ? "run" : ""}" data-id="${esc(it.id)}">
             <span>${it.running ? "🎙️" : k + 1 + "."}</span>
-            <div class="qd-info"><b>${qLabel(it.label)}</b>${it.running ? stagesHtml(it) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
+            <div class="qd-info"><b>${qLabel(it.label)}${it.running ? `<span class="qd-pct">${it.progress || 0}%</span>` : ""}</b>${it.running ? `<div class="progress qd-bar"><div style="width:${Math.max(2, it.progress || 0)}%"></div></div>` + stagesHtml(it) : ""}<small>${esc(it.message)}${esc(wait)}${esc(tries)}${it.running && it.startedAt ? esc(` · total ${mmss(Date.now() - it.startedAt)}`) : ""}</small></div>
             <div class="qd-act">
               ${!it.running && (it.retryAt || k > 0) ? `<button class="btn ghost" data-q="now" title="Passar para a frente e tentar já">Agora</button>` : ""}
               ${!it.running && k > 0 && !q.items[k - 1].running ? `<button class="btn ghost" data-q="up" aria-label="Subir na fila" title="Subir">↑</button>` : ""}
@@ -3978,8 +3987,9 @@ $("#md-go").onclick = async () => {
     for (;;) {
       await sleep(2500);
       const j = await api(`/api/jobs/${jobId}`);
-      $("#md-msg").textContent = j.status === "error" ? `⚠️ ${j.error}` : j.message;
-      $("#md-bar").style.width = Math.max(3, Math.round(((j.step || 0) / (j.total || 1)) * 100)) + "%";
+      const mdPct = j.status === "done" ? 100 : j.progress != null ? j.progress : Math.round(((j.step || 0) / (j.total || 1)) * 100);
+      $("#md-msg").textContent = j.status === "error" ? `⚠️ ${j.error}` : pctMsg(mdPct, j.message);
+      $("#md-bar").style.width = Math.max(3, mdPct) + "%";
       $("#md-steps").innerHTML = (j.items || [])
         .map((it) => `<li class="${it.kind}"><i>${it.error ? "⚠️" : it.kind === "song" ? "🎵" : "📝"}</i>${esc(it.moment)}<small>${esc(it.error || it.title)}</small></li>`)
         .join("");
