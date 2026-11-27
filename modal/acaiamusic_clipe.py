@@ -17,11 +17,15 @@ image = (
         "torch==2.5.1", "diffusers==0.32.2", "transformers==4.46.3", "accelerate==1.1.1", "sentencepiece", "safetensors",
         "imageio==2.36.1", "imageio-ffmpeg==0.5.1", "pillow", "fastapi[standard]",
     )
+    # baixa e já guarda em bf16 (metade do tamanho): a imagem fica menor e o estúdio liga mais rápido
     .run_commands(
-        "python -c \"from huggingface_hub import snapshot_download; "
-        f"snapshot_download('{MODEL}', allow_patterns=['model_index.json','scheduler/*','tokenizer/*','text_encoder/*','transformer/*','vae/*'])\""
+        "python -c \"import torch, shutil, os; from diffusers import LTXImageToVideoPipeline; "
+        f"p = LTXImageToVideoPipeline.from_pretrained('{MODEL}', torch_dtype=torch.bfloat16); "
+        "p.save_pretrained('/models/ltx', safe_serialization=True); "
+        "shutil.rmtree(os.path.expanduser('~/.cache/huggingface'), ignore_errors=True)\""
     )
 )
+LOCAL = "/models/ltx"
 _pipe = None
 
 
@@ -31,7 +35,7 @@ def _ltx():
         import torch
         from diffusers import LTXImageToVideoPipeline
 
-        _pipe = LTXImageToVideoPipeline.from_pretrained(MODEL, torch_dtype=torch.bfloat16).to("cuda")
+        _pipe = LTXImageToVideoPipeline.from_pretrained(LOCAL, torch_dtype=torch.bfloat16).to("cuda")
         try:
             _pipe.vae.enable_tiling()
         except Exception:
@@ -46,7 +50,7 @@ def _ltx():
     secrets=[modal.Secret.from_name("acaiamusic")],
     scaledown_window=60,
     max_containers=1,
-    timeout=15 * 60,
+    timeout=25 * 60,
 )
 @modal.fastapi_endpoint(method="POST")
 def clipe(item: dict):
@@ -54,9 +58,13 @@ def clipe(item: dict):
     import io
     import tempfile
 
+    import time
+
     import torch
     from diffusers.utils import export_to_video
     from PIL import Image
+
+    t0 = time.time()
 
     if item.get("key") != os.environ["ACESTEP_API_KEY"]:
         return {"error": "Chave incorreta."}
@@ -79,21 +87,26 @@ def clipe(item: dict):
 
     scene = str(item.get("prompt", ""))[:600]
     prompt = (
-        f"{scene}. The scene comes alive with gentle, natural, continuous motion: soft wind moves the grass, leaves and flowers, "
-        "clouds drift slowly across the sky, warm light rays shimmer and glow, water ripples softly, tiny particles of light float in the air. "
-        "Slow cinematic camera push-in. Peaceful, sacred, contemplative atmosphere, high detail, smooth motion."
+        "A living cinematic shot. The wind blows steadily: grass, flowers and leaves sway visibly back and forth, "
+        "clouds move across the sky, the sunlight flickers and glows, light rays pulse, glowing particles drift upward through the air, "
+        "water flows and sparkles. The camera slowly dollies forward. Continuous, clearly visible natural motion everywhere in the frame. "
+        f"Scene: {scene}. Peaceful, sacred atmosphere, high detail."
     )
-    neg = "worst quality, inconsistent motion, blurry, jittery, distorted, deformed, morphing, flicker, text, letters, watermark, people appearing"
-    frames = int(item.get("frames", 121))
+    neg = "worst quality, static, still image, frozen, no motion, inconsistent motion, blurry, jittery, distorted, deformed, morphing, text, letters, watermark, people appearing"
+    frames = int(item.get("frames", 97))
     frames = max(49, min(161, frames - (frames - 1) % 8))  # o modelo pede 8*k+1 quadros
     g = torch.Generator("cuda").manual_seed(int(item.get("seed", 0)) or 42)
-    out = _ltx()(
+    pipe = _ltx()
+    t_load = time.time() - t0
+    out = pipe(
         image=img, prompt=prompt, negative_prompt=neg, width=w, height=h, num_frames=frames,
-        num_inference_steps=int(item.get("steps", 40)), guidance_scale=3.0, decode_timestep=0.03, decode_noise_scale=0.025, generator=g,
+        num_inference_steps=int(item.get("steps", 25)), guidance_scale=3.5, decode_timestep=0.03, decode_noise_scale=0.025, generator=g,
     ).frames[0]
     # vai e volta: repete sem emenda visível quando o vídeo de status é mais longo que o clipe
     loop = list(out) + list(out)[-2:0:-1]
     with tempfile.NamedTemporaryFile(suffix=".mp4") as f:
         export_to_video(loop, f.name, fps=24)
         data = open(f.name, "rb").read()
-    return {"video": base64.b64encode(data).decode(), "width": w, "height": h, "frames": len(out), "fps": 24}
+    t_all = time.time() - t0
+    print(f"clipe: carregar {t_load:.0f}s, gerar {t_all - t_load:.0f}s, {len(out)} quadros {w}x{h}")
+    return {"video": base64.b64encode(data).decode(), "width": w, "height": h, "frames": len(out), "fps": 24, "timing": {"load": round(t_load), "total": round(t_all)}}

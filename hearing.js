@@ -156,7 +156,7 @@ export async function animateCover(imageBuf, prompt, format = "vertical") {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key: getSettings().modalKey, image: imageBuf.toString("base64"), prompt, format, seed: Math.floor(Math.random() * 2 ** 31) }),
-    signal: AbortSignal.timeout(15 * 60 * 1000),
+    signal: AbortSignal.timeout(25 * 60 * 1000),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.video) throw new Error(j.error || `o gerador de clipes respondeu ${r.status}`);
