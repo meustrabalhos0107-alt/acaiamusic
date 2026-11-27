@@ -152,13 +152,27 @@ export function clipUrl() {
 export async function animateCover(imageBuf, prompt, format = "vertical") {
   const url = clipUrl();
   if (!url) throw new Error("O clipe animado precisa do estúdio no Modal.");
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key: getSettings().modalKey, image: imageBuf.toString("base64"), prompt, format, seed: Math.floor(Math.random() * 2 ** 31) }),
-    signal: AbortSignal.timeout(25 * 60 * 1000),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.video) throw new Error(j.error || `o gerador de clipes respondeu ${r.status}`);
-  return Buffer.from(j.video, "base64");
+  const key = getSettings().modalKey;
+  const post = async (body) => {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, ...body }), signal: AbortSignal.timeout(90000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.error) throw new Error(j.error || `o gerador de clipes respondeu ${r.status}`);
+    return j;
+  };
+  // começa o clipe e acompanha até ficar pronto (até 25 min, contando a GPU ligar)
+  const { call_id } = await post({ image: imageBuf.toString("base64"), prompt, format, seed: Math.floor(Math.random() * 2 ** 31) });
+  if (!call_id) throw new Error("o gerador de clipes não começou");
+  const until = Date.now() + 25 * 60 * 1000;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 10000));
+    let j;
+    try {
+      j = await post({ call_id });
+    } catch (e) {
+      if (/não deu certo|Chave/i.test(e.message)) throw e;
+      continue; // falha passageira de rede: tenta de novo na próxima volta
+    }
+    if (j.video) return Buffer.from(j.video, "base64");
+  }
+  throw new Error("o clipe demorou demais");
 }

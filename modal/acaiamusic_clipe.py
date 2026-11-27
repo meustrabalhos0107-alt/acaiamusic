@@ -52,8 +52,7 @@ def _ltx():
     max_containers=1,
     timeout=25 * 60,
 )
-@modal.fastapi_endpoint(method="POST")
-def clipe(item: dict):
+def gerar(item: dict):
     import base64
     import io
     import tempfile
@@ -66,8 +65,6 @@ def clipe(item: dict):
 
     t0 = time.time()
 
-    if item.get("key") != os.environ["ACESTEP_API_KEY"]:
-        return {"error": "Chave incorreta."}
     try:
         img = Image.open(io.BytesIO(base64.b64decode(item["image"]))).convert("RGB")
     except Exception:
@@ -110,3 +107,25 @@ def clipe(item: dict):
     t_all = time.time() - t0
     print(f"clipe: carregar {t_load:.0f}s, gerar {t_all - t_load:.0f}s, {len(out)} quadros {w}x{h}")
     return {"video": base64.b64encode(data).decode(), "width": w, "height": h, "frames": len(out), "fps": 24, "timing": {"load": round(t_load), "total": round(t_all)}}
+
+
+# Endereço público (leve, sem GPU): começa um clipe e devolve um número; depois, com o número,
+# diz se já ficou pronto. Assim nenhum pedido fica minutos aberto (o Modal expirava com erro 408
+# quando a GPU demorava a ligar).
+@app.function(image=modal.Image.debian_slim(python_version="3.11").pip_install("fastapi[standard]"), secrets=[modal.Secret.from_name("acaiamusic")])
+@modal.fastapi_endpoint(method="POST")
+def clipe(item: dict):
+    if item.get("key") != os.environ["ACESTEP_API_KEY"]:
+        return {"error": "Chave incorreta."}
+    if item.get("call_id"):
+        call = modal.FunctionCall.from_id(str(item["call_id"]))
+        try:
+            return call.get(timeout=0)
+        except TimeoutError:
+            return {"pending": True}
+        except Exception as e:
+            return {"error": f"O clipe não deu certo: {str(e)[:200]}"}
+    if not item.get("image"):
+        return {"error": "Imagem inválida."}
+    call = gerar.spawn(item)
+    return {"call_id": call.object_id}
